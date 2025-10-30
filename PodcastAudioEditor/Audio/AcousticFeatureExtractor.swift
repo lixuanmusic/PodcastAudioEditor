@@ -8,7 +8,15 @@ struct FeatureExtractionConfig {
     var extractSpectralCentroid: Bool = false  // 谱质心（可选，辅助分类）
     var extractMFCC: Bool = true         // MFCC（建议，用于分类和发言人识别）
     
-    // 快速模式：只提取必要特征
+    // 极速模式：只提取能量（静音+响度检测，无FFT）
+    static let ultraFast = FeatureExtractionConfig(
+        extractEnergy: true,
+        extractZCR: false,
+        extractSpectralCentroid: false,
+        extractMFCC: false
+    )
+    
+    // 快速模式：能量+MFCC（支持分类和发言人识别）
     static let fast = FeatureExtractionConfig(
         extractEnergy: true,
         extractZCR: false,
@@ -146,7 +154,6 @@ final class AcousticFeatureExtractor {
             throw NSError(domain: "FeatureExtractor", code: -2, userInfo: nil)
         }
         
-        var allFeatures: [AcousticFeatures] = []
         let totalSamples = Int(buffer.frameLength)
         let numFrames = (totalSamples - frameSize) / hopSize + 1
         performanceMetrics.frameCount = numFrames
@@ -154,64 +161,76 @@ final class AcousticFeatureExtractor {
         print("📊 开始提取特征: \(numFrames)帧, \(totalSamples)采样点")
         let overallStart = CFAbsoluteTimeGetCurrent()
         
-        for frameIdx in 0..<numFrames {
+        // 并行处理：使用线程安全的结果数组和性能统计
+        let resultsQueue = DispatchQueue(label: "feature.results")
+        let metricsQueue = DispatchQueue(label: "feature.metrics")
+        
+        var allFeatures: [AcousticFeatures?] = Array(repeating: nil, count: numFrames)
+        
+        // 并行处理帧
+        let config = self.config  // 捕获配置避免重复访问
+        DispatchQueue.concurrentPerform(iterations: numFrames) { frameIdx in
             let startIdx = frameIdx * hopSize
             let endIdx = min(startIdx + frameSize, totalSamples)
             let frameLength = endIdx - startIdx
             
-            guard frameLength > 0 else { continue }
+            guard frameLength > 0 else { return }
             
-            // 提取当前帧
-            let frame = Array(UnsafeBufferPointer(start: channelData + startIdx, count: frameLength))
+            // 直接使用指针，避免数组拷贝
+            let frameBuffer = UnsafeBufferPointer(start: channelData + startIdx, count: frameLength)
             
             // 计算特征（根据配置选择性计算，带计时）
             var energy: Float = 0
+            var energyTime: TimeInterval = 0
             if config.extractEnergy {
-                let energyStart = CFAbsoluteTimeGetCurrent()
-                energy = calculateEnergy(frame: frame)
-                performanceMetrics.energyTime += CFAbsoluteTimeGetCurrent() - energyStart
+                let start = CFAbsoluteTimeGetCurrent()
+                energy = self.calculateEnergyFast(frameBuffer: frameBuffer)
+                energyTime = CFAbsoluteTimeGetCurrent() - start
             }
-            
+                
             var zcr: Float = 0
+            var zcrTime: TimeInterval = 0
             if config.extractZCR {
-                let zcrStart = CFAbsoluteTimeGetCurrent()
-                zcr = calculateZeroCrossingRate(frame: frame)
-                performanceMetrics.zcrTime += CFAbsoluteTimeGetCurrent() - zcrStart
+                let start = CFAbsoluteTimeGetCurrent()
+                zcr = self.calculateZeroCrossingRateFast(frameBuffer: frameBuffer)
+                zcrTime = CFAbsoluteTimeGetCurrent() - start
             }
             
             // FFT只在需要谱质心或MFCC时计算
             var fft: [Float] = []
+            var fftTime: TimeInterval = 0
             if config.extractSpectralCentroid || config.extractMFCC {
-                let fftStart = CFAbsoluteTimeGetCurrent()
-                fft = performFFT(frame: frame)
-                performanceMetrics.fftTime += CFAbsoluteTimeGetCurrent() - fftStart
+                let start = CFAbsoluteTimeGetCurrent()
+                fft = self.performFFT(frameBuffer: frameBuffer)
+                fftTime = CFAbsoluteTimeGetCurrent() - start
             }
             
             var spectralCentroid: Float = 0
+            var centroidTime: TimeInterval = 0
             if config.extractSpectralCentroid && !fft.isEmpty {
-                let centroidStart = CFAbsoluteTimeGetCurrent()
-                spectralCentroid = calculateSpectralCentroidFromFFT(fft: fft)
-                performanceMetrics.spectralCentroidTime += CFAbsoluteTimeGetCurrent() - centroidStart
+                let start = CFAbsoluteTimeGetCurrent()
+                spectralCentroid = self.calculateSpectralCentroidFromFFT(fft: fft)
+                centroidTime = CFAbsoluteTimeGetCurrent() - start
             }
             
             var mfcc: [Float] = Array(repeating: 0, count: 13)
+            var mfccTime: TimeInterval = 0
             if config.extractMFCC {
-                let mfccStart = CFAbsoluteTimeGetCurrent()
+                let start = CFAbsoluteTimeGetCurrent()
                 if !fft.isEmpty {
-                    mfcc = calculateMFCCFromFFT(fft: fft, frame: frame)
+                    mfcc = self.calculateMFCCFromFFT(fft: fft, frameBuffer: frameBuffer)
                 } else {
                     // 如果之前没计算FFT，现在计算
                     let fftStart = CFAbsoluteTimeGetCurrent()
-                    fft = performFFT(frame: frame)
-                    performanceMetrics.fftTime += CFAbsoluteTimeGetCurrent() - fftStart
-                    mfcc = calculateMFCCFromFFT(fft: fft, frame: frame)
+                    fft = self.performFFT(frameBuffer: frameBuffer)
+                    fftTime += CFAbsoluteTimeGetCurrent() - fftStart
+                    mfcc = self.calculateMFCCFromFFT(fft: fft, frameBuffer: frameBuffer)
                 }
-                performanceMetrics.mfccTime += CFAbsoluteTimeGetCurrent() - mfccStart
+                mfccTime = CFAbsoluteTimeGetCurrent() - start
             }
             
-            let isVoiced = energy > -40  // 简单判断：能量 > -40dB 认为有声
-            
-            let timestamp = Double(startIdx) / sampleRate
+            let isVoiced = energy > -40
+            let timestamp = Double(startIdx) / self.sampleRate
             let feature = AcousticFeatures(
                 timestamp: timestamp,
                 energy: energy,
@@ -221,15 +240,19 @@ final class AcousticFeatureExtractor {
                 isVoiced: isVoiced
             )
             
-            allFeatures.append(feature)
-            
-            // 进度回调
-            if frameIdx % 100 == 0 || frameIdx == numFrames - 1 {
-                let progress = Double(frameIdx + 1) / Double(numFrames)
-                onProgress(progress)
+            // 线程安全地更新结果
+            resultsQueue.async {
+                allFeatures[frameIdx] = feature
+                let currentCount = allFeatures.compactMap { $0 }.count  // 线程安全计数
                 
-                // 每1000帧输出一次中间进度
-                if frameIdx % 1000 == 0 && frameIdx > 0 {
+                // 更新进度（只在特定帧数时更新，减少竞争）
+                if frameIdx % 100 == 0 || frameIdx == numFrames - 1 {
+                    let progress = Double(currentCount) / Double(numFrames)
+                    onProgress(progress)
+                }
+                
+                // 每1000帧输出进度
+                if frameIdx > 0 && frameIdx % 1000 == 0 {
                     let elapsed = CFAbsoluteTimeGetCurrent() - overallStart
                     let avgTimePerFrame = elapsed / Double(frameIdx + 1)
                     let estimatedTotal = avgTimePerFrame * Double(numFrames)
@@ -237,23 +260,61 @@ final class AcousticFeatureExtractor {
                     print("⏳ 进度: \(frameIdx)/\(numFrames)帧, 已用: \(String(format: "%.1f", elapsed))秒, 预计剩余: \(String(format: "%.1f", remaining))秒")
                 }
             }
+            
+            // 累加性能统计（线程安全）
+            metricsQueue.async {
+                self.performanceMetrics.energyTime += energyTime
+                self.performanceMetrics.zcrTime += zcrTime
+                self.performanceMetrics.fftTime += fftTime
+                self.performanceMetrics.spectralCentroidTime += centroidTime
+                self.performanceMetrics.mfccTime += mfccTime
+            }
         }
         
+        // 等待所有帧处理完成
+        resultsQueue.sync {}
+        metricsQueue.sync {}
+        
+        // 过滤nil并排序（确保时间顺序）
+        let sortedFeatures = allFeatures.compactMap { $0 }.sorted { $0.timestamp < $1.timestamp }
+        
         onProgress(1.0)
-        print("✓ 特征提取完成: 共\(allFeatures.count)个数据点")
-        return allFeatures
+        print("✓ 特征提取完成: 共\(sortedFeatures.count)个数据点")
+        return sortedFeatures
     }
     
-    // 计算能量（dB）
-    private func calculateEnergy(frame: [Float]) -> Float {
-        let sumSquares = frame.reduce(0.0) { $0 + $1 * $1 }
-        let rms = sqrt(sumSquares / Float(frame.count))
-        // 转换为dB（以1.0为参考）
+    // 计算能量（dB）- 使用UnsafeBufferPointer避免拷贝
+    private func calculateEnergyFast(frameBuffer: UnsafeBufferPointer<Float>) -> Float {
+        var sumSquares: Float = 0.0
+        vDSP_svesq(frameBuffer.baseAddress!, 1, &sumSquares, vDSP_Length(frameBuffer.count))
+        let rms = sqrt(sumSquares / Float(frameBuffer.count))
         let db = 20 * log10(max(rms, 1e-6))
         return db
     }
     
-    // 计算零交叉率（0-1）
+    // 计算能量（dB）- 兼容方法
+    private func calculateEnergy(frame: [Float]) -> Float {
+        let sumSquares = frame.reduce(0.0) { $0 + $1 * $1 }
+        let rms = sqrt(sumSquares / Float(frame.count))
+        let db = 20 * log10(max(rms, 1e-6))
+        return db
+    }
+    
+    // 计算零交叉率（0-1）- 使用UnsafeBufferPointer
+    private func calculateZeroCrossingRateFast(frameBuffer: UnsafeBufferPointer<Float>) -> Float {
+        guard frameBuffer.count > 1 else { return 0 }
+        var zeroCount = 0
+        for i in 1..<frameBuffer.count {
+            let curr = frameBuffer[i]
+            let prev = frameBuffer[i-1]
+            if (curr >= 0 && prev < 0) || (curr < 0 && prev >= 0) {
+                zeroCount += 1
+            }
+        }
+        return Float(zeroCount) / Float(frameBuffer.count - 1)
+    }
+    
+    // 计算零交叉率（0-1）- 兼容方法
     private func calculateZeroCrossingRate(frame: [Float]) -> Float {
         guard frame.count > 1 else { return 0 }
         var zeroCount = 0
@@ -291,8 +352,8 @@ final class AcousticFeatureExtractor {
         return centroid / sumMag
     }
     
-    // 计算MFCC（梅尔频率倒谱系数，13维）- 使用已计算的FFT结果
-    private func calculateMFCCFromFFT(fft: [Float], frame: [Float]) -> [Float] {
+    // 计算MFCC（梅尔频率倒谱系数，13维）- 使用已计算的FFT结果和UnsafeBufferPointer
+    private func calculateMFCCFromFFT(fft: [Float], frameBuffer: UnsafeBufferPointer<Float>) -> [Float] {
         // 简化版MFCC：使用对数能量+频率特性
         // 完整实现需要Mel滤波组和离散余弦变换
         
@@ -322,35 +383,42 @@ final class AcousticFeatureExtractor {
             mfcc[4 + band] = log10(max(bandEnergy, 1e-6))
         }
         
-        // 能量特征
-        let energy = calculateEnergy(frame: frame)
+        // 能量特征（使用快速方法）
+        let energy = calculateEnergyFast(frameBuffer: frameBuffer)
         mfcc[0] = energy
         mfcc[1] = energy / 2  // 简化导数近似
-        mfcc[2] = calculateZeroCrossingRate(frame: frame)
+        mfcc[2] = calculateZeroCrossingRateFast(frameBuffer: frameBuffer)
         let spectralCentroid = calculateSpectralCentroidFromFFT(fft: fft)
         mfcc[3] = spectralCentroid / Float(sampleRate) * 2  // 归一化
         
         return mfcc
     }
     
-    // 执行FFT
-    private func performFFT(frame: [Float]) -> [Float] {
-        var input = frame
-        
-        // 应用Hann窗
-        for i in 0..<input.count {
-            let window = Float(0.5 * (1 - cos(2 * Double.pi * Double(i) / Double(input.count - 1))))
-            input[i] *= window
-        }
+    // 兼容方法
+    private func calculateMFCCFromFFT(fft: [Float], frame: [Float]) -> [Float] {
+        let frameBuffer = UnsafeBufferPointer(start: frame, count: frame.count)
+        return calculateMFCCFromFFT(fft: fft, frameBuffer: frameBuffer)
+    }
+    
+    // 执行FFT - 使用UnsafeBufferPointer避免拷贝
+    private func performFFT(frameBuffer: UnsafeBufferPointer<Float>) -> [Float] {
+        let frameCount = frameBuffer.count
         
         // 补零到2的幂次
         var fftLength = 1
-        while fftLength < input.count {
+        while fftLength < frameCount {
             fftLength *= 2
         }
         
-        var realInput = Array(input) + Array(repeating: Float(0), count: fftLength - input.count)
-        var imagInput = Array(repeating: Float(0), count: fftLength)
+        // 分配内存（应用Hann窗并补零）
+        var realInput = [Float](repeating: 0, count: fftLength)
+        var imagInput = [Float](repeating: 0, count: fftLength)
+        
+        // 应用Hann窗并复制数据
+        for i in 0..<frameCount {
+            let window = Float(0.5 * (1 - cos(2 * Double.pi * Double(i) / Double(frameCount - 1))))
+            realInput[i] = frameBuffer[i] * window
+        }
         
         // 使用Accelerate进行FFT
         var splitComplex = DSPSplitComplex(
@@ -368,11 +436,18 @@ final class AcousticFeatureExtractor {
         
         // 将结果转换为实虚交替的形式
         var result: [Float] = []
+        result.reserveCapacity(fftLength * 2)
         for i in 0..<fftLength {
             result.append(realInput[i])
             result.append(imagInput[i])
         }
         
         return result
+    }
+    
+    // 兼容方法
+    private func performFFT(frame: [Float]) -> [Float] {
+        let frameBuffer = UnsafeBufferPointer(start: frame, count: frame.count)
+        return performFFT(frameBuffer: frameBuffer)
     }
 }
