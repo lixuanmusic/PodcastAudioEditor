@@ -103,9 +103,14 @@ struct MainEditorView: View {
             }
         }
         .ignoresSafeArea(.all, edges: .bottom)
-        .onReceive(viewModel.$currentTime) { _ in
+        .onReceive(viewModel.$currentTime) { currentTime in
             if viewModel.isPlaying && viewModel.waveformScale > 1.0 {
                 viewModel.updatePlaybackFollow()
+            }
+            
+            // 更新当前增益显示
+            if audioProcessor.config.volumeBalanceEnabled && !audioProcessor.gains.isEmpty {
+                audioProcessor.updateCurrentGain(for: currentTime)
             }
         }
         .onReceive(viewModel.$isPlaying) { isPlaying in

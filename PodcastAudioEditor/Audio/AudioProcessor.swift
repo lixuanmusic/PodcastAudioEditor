@@ -7,13 +7,16 @@ struct AudioProcessingConfig {
     var targetLUFS: Float = -16.0  // 目标响度（LUFS）
     var maxGainDB: Float = 12.0    // 最大增益（dB）
     var minGainDB: Float = -12.0   // 最小增益（dB）
-    var smoothingWindow: Int = 100 // 平滑窗口（帧数）
+    var smoothingWindow: Int = 10 // 平滑窗口（帧数）
 }
 
 // 音频处理器：负责各种音频优化处理
 class AudioProcessor: ObservableObject {
     @Published var config = AudioProcessingConfig()
     @Published var isProcessing = false
+    @Published var currentGainDB: Float = 0.0  // 当前应用的增益（dB）
+    @Published var averageGainDB: Float = 0.0  // 平均增益（dB）
+    @Published var gains: [Float] = []  // 计算好的增益数组
     
     // 根据声学特征计算音量调节增益
     func calculateVolumeGains(features: [AcousticFeatures]) -> [Float] {
@@ -51,7 +54,37 @@ class AudioProcessor: ObservableObject {
         // 平滑增益曲线（避免突变）
         let smoothedGains = smoothGains(gains, windowSize: config.smoothingWindow)
         
+        // 保存增益数组并计算统计信息
+        DispatchQueue.main.async {
+            self.gains = smoothedGains
+            
+            // 计算平均增益（排除静音段）
+            let nonZeroGains = smoothedGains.filter { abs($0) > 0.1 }
+            if !nonZeroGains.isEmpty {
+                self.averageGainDB = nonZeroGains.reduce(0, +) / Float(nonZeroGains.count)
+            } else {
+                self.averageGainDB = 0
+            }
+            
+            print("✓ 增益计算完成: 平均增益 \(String(format: "%.1f", self.averageGainDB))dB")
+        }
+        
         return smoothedGains
+    }
+    
+    // 更新当前播放位置的增益显示
+    func updateCurrentGain(for time: TimeInterval, hopSize: Int = 768, sampleRate: Double = 44100) {
+        guard !gains.isEmpty else {
+            currentGainDB = 0
+            return
+        }
+        
+        // 计算对应的帧索引
+        let sampleIdx = Int(time * sampleRate)
+        let frameIdx = sampleIdx / hopSize
+        let gainIdx = min(frameIdx, gains.count - 1)
+        
+        currentGainDB = gains[gainIdx]
     }
     
     // 平滑增益曲线

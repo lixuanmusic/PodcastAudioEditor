@@ -1,5 +1,48 @@
 import SwiftUI
 
+// 增益指示器视图
+struct GainIndicatorView: View {
+    let currentGain: Float
+    
+    var body: some View {
+        GeometryReader { geometry in
+            ZStack(alignment: .leading) {
+                // 背景条
+                RoundedRectangle(cornerRadius: 2)
+                    .fill(Color.gray.opacity(0.2))
+                    .frame(height: 6)
+                
+                // 中心线（0 dB）
+                Rectangle()
+                    .fill(Color.gray.opacity(0.5))
+                    .frame(width: 1, height: 10)
+                    .offset(x: geometry.size.width / 2)
+                
+                // 当前增益指示器
+                let normalizedGain = (currentGain + 12) / 24  // -12~+12 映射到 0~1
+                let clampedGain = CGFloat(max(0, min(1, normalizedGain)))
+                
+                Circle()
+                    .fill(gainColor(currentGain))
+                    .frame(width: 12, height: 12)
+                    .offset(x: clampedGain * geometry.size.width - 6)
+            }
+        }
+        .frame(height: 12)
+    }
+    
+    private func gainColor(_ gain: Float) -> Color {
+        let absGain = abs(gain)
+        if absGain < 3 {
+            return .green
+        } else if absGain < 6 {
+            return .orange
+        } else {
+            return .red
+        }
+    }
+}
+
 struct AudioProcessingPanel: View {
     @ObservedObject var processor: AudioProcessor
     @ObservedObject var analysisVM: AudioAnalysisViewModel
@@ -9,6 +52,13 @@ struct AudioProcessingPanel: View {
     @State private var isExporting = false
     @State private var exportProgress: Double = 0.0
     @State private var showSuccessMessage = false
+    
+    // 监听分析完成
+    private func checkAnalysisCompleted() {
+        if !analysisVM.isAnalyzing && !analysisVM.features.isEmpty && processor.config.volumeBalanceEnabled {
+            let _ = processor.calculateVolumeGains(features: analysisVM.features)
+        }
+    }
     
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -25,6 +75,12 @@ struct AudioProcessingPanel: View {
                 HStack {
                     Toggle("音量动态平衡", isOn: $processor.config.volumeBalanceEnabled)
                         .toggleStyle(.switch)
+                        .onChange(of: processor.config.volumeBalanceEnabled) { enabled in
+                            if enabled && !analysisVM.features.isEmpty {
+                                // 自动计算增益
+                                let _ = processor.calculateVolumeGains(features: analysisVM.features)
+                            }
+                        }
                     
                     Spacer()
                     
@@ -40,35 +96,88 @@ struct AudioProcessingPanel: View {
                 }
                 
                 if processor.config.volumeBalanceEnabled {
-                    VStack(alignment: .leading, spacing: 8) {
-                        HStack {
-                            Text("目标响度:")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                            Text("\(String(format: "%.1f", processor.config.targetLUFS)) LUFS")
-                                .font(.caption)
-                                .monospacedDigit()
+                    VStack(alignment: .leading, spacing: 12) {
+                        // 当前增益显示（实时）
+                        VStack(alignment: .leading, spacing: 6) {
+                            HStack {
+                                Text("当前增益:")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                Text("\(String(format: "%+.1f", processor.currentGainDB)) dB")
+                                    .font(.caption)
+                                    .fontWeight(.semibold)
+                                    .monospacedDigit()
+                                    .foregroundStyle(gainColor(processor.currentGainDB))
+                            }
+                            
+                            // 增益指示器（-12 到 +12 dB）
+                            GainIndicatorView(currentGain: processor.currentGainDB)
+                            
+                            // 刻度标签
+                            HStack {
+                                Text("-12dB")
+                                    .font(.system(size: 9))
+                                    .foregroundStyle(.secondary)
+                                Spacer()
+                                Text("0dB")
+                                    .font(.system(size: 9))
+                                    .foregroundStyle(.secondary)
+                                Spacer()
+                                Text("+12dB")
+                                    .font(.system(size: 9))
+                                    .foregroundStyle(.secondary)
+                            }
                         }
                         
+                        Divider()
+                        
+                        // 平均增益
                         HStack {
-                            Text("调节范围:")
+                            Text("平均增益:")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
-                            Text("\(String(format: "%.0f", processor.config.minGainDB))dB ~ \(String(format: "%.0f", processor.config.maxGainDB))dB")
+                            Text("\(String(format: "%+.1f", processor.averageGainDB)) dB")
                                 .font(.caption)
                                 .monospacedDigit()
+                                .foregroundStyle(gainColor(processor.averageGainDB))
                         }
                         
-                        HStack {
-                            Text("平滑窗口:")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                            Text("\(processor.config.smoothingWindow) 帧")
-                                .font(.caption)
-                                .monospacedDigit()
+                        // 配置参数（折叠）
+                        DisclosureGroup("配置参数") {
+                            VStack(alignment: .leading, spacing: 6) {
+                                HStack {
+                                    Text("目标响度:")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                    Text("\(String(format: "%.1f", processor.config.targetLUFS)) LUFS")
+                                        .font(.caption)
+                                        .monospacedDigit()
+                                }
+                                
+                                HStack {
+                                    Text("调节范围:")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                    Text("\(String(format: "%.0f", processor.config.minGainDB))dB ~ \(String(format: "%.0f", processor.config.maxGainDB))dB")
+                                        .font(.caption)
+                                        .monospacedDigit()
+                                }
+                                
+                                HStack {
+                                    Text("平滑窗口:")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                    Text("\(processor.config.smoothingWindow) 帧")
+                                        .font(.caption)
+                                        .monospacedDigit()
+                                }
+                            }
+                            .padding(.top, 4)
                         }
+                        .font(.caption)
                     }
                     .padding(.leading, 20)
+                    .padding(.trailing, 12)
                 }
             }
             .padding(.horizontal, 12)
@@ -116,6 +225,23 @@ struct AudioProcessingPanel: View {
                 .stroke(Color.gray.opacity(0.2), lineWidth: 1)
         )
         .padding(8)
+        .onReceive(analysisVM.$isAnalyzing) { isAnalyzing in
+            if !isAnalyzing {
+                checkAnalysisCompleted()
+            }
+        }
+    }
+    
+    // 增益颜色映射
+    private func gainColor(_ gain: Float) -> Color {
+        let absGain = abs(gain)
+        if absGain < 3 {
+            return .green
+        } else if absGain < 6 {
+            return .orange
+        } else {
+            return .red
+        }
     }
     
     private func exportProcessedAudio() {
