@@ -1,6 +1,30 @@
 import AVFoundation
 import Accelerate
 
+// 特征提取配置
+struct FeatureExtractionConfig {
+    var extractEnergy: Bool = true       // 能量（必须，用于静音和响度检测）
+    var extractZCR: Bool = false         // 零交叉率（可选，辅助分类）
+    var extractSpectralCentroid: Bool = false  // 谱质心（可选，辅助分类）
+    var extractMFCC: Bool = true         // MFCC（建议，用于分类和发言人识别）
+    
+    // 快速模式：只提取必要特征
+    static let fast = FeatureExtractionConfig(
+        extractEnergy: true,
+        extractZCR: false,
+        extractSpectralCentroid: false,
+        extractMFCC: true
+    )
+    
+    // 完整模式：提取所有特征
+    static let full = FeatureExtractionConfig(
+        extractEnergy: true,
+        extractZCR: true,
+        extractSpectralCentroid: true,
+        extractMFCC: true
+    )
+}
+
 // 性能统计结构
 struct PerformanceMetrics {
     var energyTime: TimeInterval = 0
@@ -53,17 +77,20 @@ final class AcousticFeatureExtractor {
     private let sampleRate: Double
     private let frameSize: Int = 1024  // 分帧大小（约23ms @ 44100Hz，满足语音分析需求）
     private let hopSize: Int = 768     // 帧移（25%重叠，平衡性能和时间分辨率）
+    private let config: FeatureExtractionConfig  // 特征提取配置
     
     var features: [AcousticFeatures] = []
     var isProcessing: Bool = false
     var performanceMetrics = PerformanceMetrics()  // 性能统计
     
-    init?(audioFileURL: URL) {
+    init?(audioFileURL: URL, config: FeatureExtractionConfig = .fast) {
         guard let audioFile = try? AVAudioFile(forReading: audioFileURL) else {
             return nil
         }
         self.audioFile = audioFile
         self.sampleRate = audioFile.processingFormat.sampleRate
+        self.config = config
+        print("📋 特征提取配置: 能量=\(config.extractEnergy), ZCR=\(config.extractZCR), 谱质心=\(config.extractSpectralCentroid), MFCC=\(config.extractMFCC)")
     }
     
     // 异步提取所有特征
@@ -137,27 +164,50 @@ final class AcousticFeatureExtractor {
             // 提取当前帧
             let frame = Array(UnsafeBufferPointer(start: channelData + startIdx, count: frameLength))
             
-            // 计算特征（带计时）
-            let energyStart = CFAbsoluteTimeGetCurrent()
-            let energy = calculateEnergy(frame: frame)
-            performanceMetrics.energyTime += CFAbsoluteTimeGetCurrent() - energyStart
+            // 计算特征（根据配置选择性计算，带计时）
+            var energy: Float = 0
+            if config.extractEnergy {
+                let energyStart = CFAbsoluteTimeGetCurrent()
+                energy = calculateEnergy(frame: frame)
+                performanceMetrics.energyTime += CFAbsoluteTimeGetCurrent() - energyStart
+            }
             
-            let zcrStart = CFAbsoluteTimeGetCurrent()
-            let zcr = calculateZeroCrossingRate(frame: frame)
-            performanceMetrics.zcrTime += CFAbsoluteTimeGetCurrent() - zcrStart
+            var zcr: Float = 0
+            if config.extractZCR {
+                let zcrStart = CFAbsoluteTimeGetCurrent()
+                zcr = calculateZeroCrossingRate(frame: frame)
+                performanceMetrics.zcrTime += CFAbsoluteTimeGetCurrent() - zcrStart
+            }
             
-            // 先计算FFT（一次，用于多个特征）
-            let fftStart = CFAbsoluteTimeGetCurrent()
-            let fft = performFFT(frame: frame)
-            performanceMetrics.fftTime += CFAbsoluteTimeGetCurrent() - fftStart
+            // FFT只在需要谱质心或MFCC时计算
+            var fft: [Float] = []
+            if config.extractSpectralCentroid || config.extractMFCC {
+                let fftStart = CFAbsoluteTimeGetCurrent()
+                fft = performFFT(frame: frame)
+                performanceMetrics.fftTime += CFAbsoluteTimeGetCurrent() - fftStart
+            }
             
-            let centroidStart = CFAbsoluteTimeGetCurrent()
-            let spectralCentroid = calculateSpectralCentroidFromFFT(fft: fft)
-            performanceMetrics.spectralCentroidTime += CFAbsoluteTimeGetCurrent() - centroidStart
+            var spectralCentroid: Float = 0
+            if config.extractSpectralCentroid && !fft.isEmpty {
+                let centroidStart = CFAbsoluteTimeGetCurrent()
+                spectralCentroid = calculateSpectralCentroidFromFFT(fft: fft)
+                performanceMetrics.spectralCentroidTime += CFAbsoluteTimeGetCurrent() - centroidStart
+            }
             
-            let mfccStart = CFAbsoluteTimeGetCurrent()
-            let mfcc = calculateMFCCFromFFT(fft: fft, frame: frame)
-            performanceMetrics.mfccTime += CFAbsoluteTimeGetCurrent() - mfccStart
+            var mfcc: [Float] = Array(repeating: 0, count: 13)
+            if config.extractMFCC {
+                let mfccStart = CFAbsoluteTimeGetCurrent()
+                if !fft.isEmpty {
+                    mfcc = calculateMFCCFromFFT(fft: fft, frame: frame)
+                } else {
+                    // 如果之前没计算FFT，现在计算
+                    let fftStart = CFAbsoluteTimeGetCurrent()
+                    fft = performFFT(frame: frame)
+                    performanceMetrics.fftTime += CFAbsoluteTimeGetCurrent() - fftStart
+                    mfcc = calculateMFCCFromFFT(fft: fft, frame: frame)
+                }
+                performanceMetrics.mfccTime += CFAbsoluteTimeGetCurrent() - mfccStart
+            }
             
             let isVoiced = energy > -40  // 简单判断：能量 > -40dB 认为有声
             
