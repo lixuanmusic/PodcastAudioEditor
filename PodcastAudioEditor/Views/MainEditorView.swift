@@ -4,6 +4,7 @@ import AppKit
 struct MainEditorView: View {
     @StateObject var viewModel = AudioPlayerViewModel()
     @StateObject var analysisVM = AudioAnalysisViewModel()
+    @StateObject var audioProcessor = AudioProcessor()
     @State private var isWaveformHovered: Bool = false
     @State private var showAnalysisWindow = false
     @State private var currentFileURL: URL?
@@ -70,28 +71,35 @@ struct MainEditorView: View {
                 TimelineRuler(currentTime: viewModel.currentTime, duration: viewModel.duration, scale: viewModel.waveformScale, scrollOffset: viewModel.waveformScrollOffset, waveformWidth: viewModel.waveformWidth)
                     .frame(height: 28)
 
-            ZStack(alignment: .topTrailing) {
-                WaveformView(viewModel: viewModel, isHovered: $isWaveformHovered)
-                    .frame(maxHeight: .infinity)
-                    .background(Color(NSColor.controlBackgroundColor))
-                
-                // Toast 提示 - 使用 overlay 不占用空间
-                if viewModel.showToast {
-                    ToastView(message: viewModel.toastMessage)
-                        .padding(.top, 12)
-                        .padding(.trailing, 20)
-                        .transition(.move(edge: .top).combined(with: .opacity))
+                ZStack(alignment: .topTrailing) {
+                    WaveformView(viewModel: viewModel, isHovered: $isWaveformHovered)
+                        .background(Color(NSColor.controlBackgroundColor))
+                    
+                    // Toast 提示 - 使用 overlay 不占用空间
+                    if viewModel.showToast {
+                        ToastView(message: viewModel.toastMessage)
+                            .padding(.top, 12)
+                            .padding(.trailing, 20)
+                            .transition(.move(edge: .top).combined(with: .opacity))
+                    }
                 }
-            }
-            .frame(maxHeight: .infinity)
+                
+                Divider()
+                
+                // 音频处理面板
+                AudioProcessingPanel(
+                    processor: audioProcessor,
+                    analysisVM: analysisVM,
+                    currentFileURL: $currentFileURL
+                )
+                .frame(height: 180)
             }
             
-            // 滚动条 - 完全贴到窗口下边缘
+            // 滚动条 - 在音频处理面板上方
             if viewModel.isWaveformScrollable {
                 HorizontalScrollbar(viewModel: viewModel)
                     .frame(height: 12)
-                    .offset(y: 6) // 下移6px完全贴到窗口底部
-                    .ignoresSafeArea(edges: .bottom)
+                    .offset(y: -180) // 向上偏移音频处理面板的高度
             }
         }
         .ignoresSafeArea(.all, edges: .bottom)
