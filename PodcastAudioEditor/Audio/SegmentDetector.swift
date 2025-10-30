@@ -34,7 +34,7 @@ struct Segment {
 
 final class SegmentDetector {
     private let features: [AcousticFeatures]
-    private let hopSize: Int = 512  // 与AcousticFeatureExtractor保持一致（约11.6ms @ 44100Hz）
+    private let hopSize: Int = 768  // 与AcousticFeatureExtractor保持一致（约17.4ms @ 44100Hz，25%重叠）
     private let sampleRate: Double = 44100  // 默认采样率
     
     var segments: [Segment] = []

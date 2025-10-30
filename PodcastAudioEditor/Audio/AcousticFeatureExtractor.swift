@@ -28,7 +28,7 @@ struct PerformanceMetrics {
         - FFT计算: \(String(format: "%.3f", fftTime))秒 (\(String(format: "%.1f", fftTime/totalTime*100))%)
         - MFCC: \(String(format: "%.3f", mfccTime))秒 (\(String(format: "%.1f", mfccTime/totalTime*100))%)
         
-        平均每帧耗时: \(String(format: "%.4f", totalTime/Double(frameCount)))毫秒
+        平均每帧耗时: \(String(format: "%.4f", totalTime/Double(frameCount)))秒 (约\(String(format: "%.2f", totalTime/Double(frameCount) * 1000))毫秒)
         ===================
         """
     }
@@ -52,7 +52,7 @@ final class AcousticFeatureExtractor {
     private let audioFile: AVAudioFile
     private let sampleRate: Double
     private let frameSize: Int = 1024  // 分帧大小（约23ms @ 44100Hz，满足语音分析需求）
-    private let hopSize: Int = 512     // 帧移（50%重叠，保持平滑过渡）
+    private let hopSize: Int = 768     // 帧移（25%重叠，平衡性能和时间分辨率）
     
     var features: [AcousticFeatures] = []
     var isProcessing: Bool = false
