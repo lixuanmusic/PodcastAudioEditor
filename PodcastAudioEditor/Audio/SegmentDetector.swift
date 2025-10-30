@@ -204,49 +204,40 @@ final class SegmentDetector {
     }
     
     // 识别单帧的类型
+    // 策略：在播客场景下，默认语音，只有非常明确且一致的特征才判为音乐
     private func detectFrameType(feature: AcousticFeatures) -> SegmentType {
-        // 分类逻辑（优先级从高到低）：
-        // 1. 使用ZCR（如果可用）- 最可靠的指标
-        // 2. 使用MFCC辅助判断（如果ZCR不可用或不确定）
-        // 3. 默认语音（播客以语音为主）
+        // ZCR是区分音乐和语音的关键指标：
+        // - 语音：ZCR通常较高（0.08-0.4），因为语音有更多高频变化和辅音
+        // - 音乐：ZCR通常较低（0.03-0.10），因为音乐信号更平滑
         
-        // 检查ZCR是否可用（在fast模式下应该有）
+        // 检查ZCR是否可用
         if feature.zcr > 0 {
-            // ZCR高 → 语音（语音有更多高频成分）
-            if feature.zcr > 0.15 {
-                return .speech
-            }
-            // ZCR很低 → 可能是音乐（音乐通常更平滑）
-            if feature.zcr < 0.08 {
-                // 进一步用MFCC确认
-                if feature.spectralCentroid > 0 && feature.spectralCentroid < 3000 {
+            // 只有ZCR极低（< 0.03）且同时满足其他条件才判为音乐
+            // 这样可以避免将低ZCR的语音片段误判为音乐
+            if feature.zcr < 0.03 {
+                // 需要谱质心也低（确认是低频内容，而不是静音后的短暂低能量语音）
+                if feature.spectralCentroid > 0 && feature.spectralCentroid < 2000 {
+                    // ZCR极低 + 谱质心低 → 很可能是音乐（低频音乐或背景音乐）
                     return .music
                 }
-                // 如果谱质心不可用，使用MFCC能量稳定性判断
+                // 如果谱质心不可用，需要MFCC极其稳定才判为音乐
                 if feature.spectralCentroid == 0 && !feature.mfccValues.isEmpty {
-                    // MFCC[0]是能量，如果能量较高且稳定（通过MFCC系数变化判断）
-                    let mfccVariance = feature.mfccValues.reduce(0) { $0 + abs($1) } / Float(feature.mfccValues.count)
-                    if mfccVariance < 5.0 {  // 音乐通常MFCC变化较小
+                    let mfccMean = feature.mfccValues.reduce(0) { $0 + abs($1) } / Float(feature.mfccValues.count)
+                    // ZCR极低 + MFCC极稳定（且能量不是太低） → 可能是音乐
+                    if mfccMean < 2.0 && feature.energy > -50 {
                         return .music
                     }
                 }
-                // 默认：低ZCR但不确定时，倾向于语音（播客主要是语音）
-                return .speech
             }
-            // ZCR中等（0.08-0.15）：通常是语音
+            
+            // ZCR >= 0.03 → 判为语音
+            // 大多数语音的ZCR在0.08-0.25之间
+            // 即使有些语音片段ZCR较低（0.03-0.08），也应该判为语音（保守策略）
             return .speech
         }
         
-        // ZCR不可用时，使用MFCC判断
-        if !feature.mfccValues.isEmpty {
-            // MFCC系数变化大 → 语音（语音更复杂）
-            let mfccVariance = feature.mfccValues.reduce(0) { $0 + abs($1) } / Float(feature.mfccValues.count)
-            if mfccVariance < 3.0 {
-                return .music
-            }
-        }
-        
-        // 默认返回语音（播客场景）
+        // ZCR不可用时（不应该发生，fast模式下应该提取ZCR）
+        // 默认判为语音
         return .speech
     }
 }
