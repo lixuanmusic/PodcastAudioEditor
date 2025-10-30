@@ -1,5 +1,6 @@
 import AVFoundation
 import Foundation
+import Combine
 
 // 波形处理配置（参考 Miniwave）
 struct WaveformProcessingConfig {
@@ -24,17 +25,21 @@ final class AudioEngine: ObservableObject {
     
     private var player: AVAudioPlayer?
     private var auProcessor: AudioUnitProcessor?
-    private var useAUProcessor: Bool = false
-    private var currentFileURL: URL?
+    private var useAUProcessor = false  // 是否使用AU处理
     
     @Published var isPlaying: Bool = false
     @Published var currentTime: TimeInterval = 0
     @Published var duration: TimeInterval = 0
     @Published var volume: Float = 0.9
     @Published var waveformData: [[Float]] = [] // 多声道波形数据
+    @Published var currentGainDB: Float = 0.0  // 当前AU增益值（用于UI显示）
     
     private var timer: Timer?
     private var waveformConfig = WaveformProcessingConfig()
+    private var currentFileURL: URL?
+    
+    // 观察AU处理器的增益变化
+    private var gainObserver: AnyCancellable?
     
     private init() {
         optimizeWaveformConfig()
@@ -69,94 +74,116 @@ final class AudioEngine: ObservableObject {
         stop()
         currentFileURL = url
         
-        // 如果使用 AU 处理器，用 AU 加载
         if useAUProcessor {
-            await loadFileWithAU(url: url)
+            // 使用AU处理模式
+            do {
+                let processor = AudioUnitProcessor()
+                try processor.setupAudioEngine(fileURL: url)
+                auProcessor = processor
+                
+                // 观察增益变化
+                gainObserver = processor.$currentGainDB
+                    .receive(on: DispatchQueue.main)
+                    .assign(to: \.currentGainDB, on: self)
+                
+                DispatchQueue.main.async {
+                    self.duration = processor.getDuration()
+                    self.isPlaying = false
+                    self.currentTime = 0
+                    print("✓ 音频加载成功（AU模式）: \(url.lastPathComponent), 时长: \(self.duration)s")
+                }
+            } catch {
+                print("❌ AU模式加载失败: \(error.localizedDescription)，切换到普通模式")
+                useAUProcessor = false
+                await loadFile(url: url)  // 回退到普通模式
+            }
         } else {
-            await loadFileWithPlayer(url: url)
+            // 使用AVAudioPlayer模式
+            do {
+                player = try AVAudioPlayer(contentsOf: url)
+                player?.prepareToPlay()
+                player?.isMeteringEnabled = true
+                player?.volume = volume
+                
+                DispatchQueue.main.async {
+                    self.duration = self.player?.duration ?? 0
+                    self.isPlaying = false
+                    self.currentTime = 0
+                    print("✓ 音频加载成功: \(url.lastPathComponent), 时长: \(self.duration)s")
+                }
+            } catch {
+                print("❌ 音频加载失败: \(error.localizedDescription)")
+            }
         }
         
         // 异步生成波形数据
         extractWaveformData(from: url)
     }
     
-    private func loadFileWithPlayer(url: URL) async {
-        do {
-            player = try AVAudioPlayer(contentsOf: url)
-            player?.prepareToPlay()
-            player?.isMeteringEnabled = true
-            player?.volume = volume
-            
-            DispatchQueue.main.async {
-                self.duration = self.player?.duration ?? 0
-                self.isPlaying = false
-                self.currentTime = 0
-                print("✓ 音频加载成功 (Player): \(url.lastPathComponent), 时长: \(self.duration)s")
+    // 切换到AU处理模式
+    func switchToAUProcessor(enabled: Bool, gains: [Float]? = nil, hopSize: Int = 768) {
+        useAUProcessor = enabled
+        
+        if enabled, let url = currentFileURL {
+            Task {
+                await loadFile(url: url)
+                if let gains = gains {
+                    auProcessor?.setGains(gains, hopSize: hopSize)
+                }
             }
-        } catch {
-            print("❌ 音频加载失败: \(error.localizedDescription)")
+        } else if !enabled {
+            // 切换回普通模式
+            auProcessor = nil
+            if let url = currentFileURL {
+                Task {
+                    await loadFile(url: url)
+                }
+            }
         }
     }
     
-    private func loadFileWithAU(url: URL) async {
-        let processor = AudioUnitProcessor()
-        
-        // 设置时间更新回调
-        processor.onTimeUpdate = { [weak self] time in
-            DispatchQueue.main.async {
-                self?.currentTime = time
-            }
-        }
-        
-        do {
-            try processor.loadFile(url: url)
-            auProcessor = processor
-            
-            DispatchQueue.main.async {
-                self.duration = processor.duration
-                self.isPlaying = false
-                self.currentTime = 0
-                print("✓ 音频加载成功 (AU): \(url.lastPathComponent), 时长: \(processor.duration)s")
-            }
-        } catch {
-            print("❌ AU 加载失败: \(error.localizedDescription)")
-            // 回退到普通播放器
-            await loadFileWithPlayer(url: url)
-            useAUProcessor = false
-        }
+    // 启用/禁用AU效果器
+    func setVolumeBalanceEnabled(_ enabled: Bool) {
+        auProcessor?.setEnabled(enabled)
+    }
+    
+    // 设置增益数组
+    func setVolumeBalanceGains(_ gains: [Float], hopSize: Int = 768) {
+        auProcessor?.setGains(gains, hopSize: hopSize)
     }
     
     func play() {
-        if useAUProcessor, let processor = auProcessor {
-            processor.play()
-            DispatchQueue.main.async {
-                self.isPlaying = processor.isPlaying
-            }
-        } else if let player = player {
-            player.play()
+        if useAUProcessor, let au = auProcessor {
+            au.play()
             DispatchQueue.main.async {
                 self.isPlaying = true
-                self.currentTime = player.currentTime
+                self.currentTime = au.getCurrentTime()
                 self.startTimer()
             }
-            print("▶️ 开始播放")
         } else {
-            print("⚠️ 未加载音频文件")
+            guard player != nil else {
+                print("⚠️ 未加载音频文件")
+                return
+            }
+            player?.play()
+            DispatchQueue.main.async {
+                self.isPlaying = true
+                self.currentTime = self.player?.currentTime ?? 0
+                self.startTimer()
+            }
         }
+        print("▶️ 开始播放")
     }
     
     func pause() {
         if useAUProcessor {
             auProcessor?.pause()
-            DispatchQueue.main.async {
-                self.isPlaying = false
-            }
         } else {
             player?.pause()
-            DispatchQueue.main.async {
-                self.isPlaying = false
-                self.stopTimer()
-            }
+        }
+        DispatchQueue.main.async {
+            self.isPlaying = false
+            self.stopTimer()
         }
         print("⏸️ 暂停播放")
     }
@@ -164,18 +191,14 @@ final class AudioEngine: ObservableObject {
     func stop() {
         if useAUProcessor {
             auProcessor?.stop()
-            DispatchQueue.main.async {
-                self.isPlaying = false
-                self.currentTime = 0
-            }
         } else {
             player?.stop()
             player?.currentTime = 0
-            DispatchQueue.main.async {
-                self.isPlaying = false
-                self.currentTime = 0
-                self.stopTimer()
-            }
+        }
+        DispatchQueue.main.async {
+            self.isPlaying = false
+            self.currentTime = 0
+            self.stopTimer()
         }
         print("⏹️ 停止播放")
     }
@@ -183,24 +206,19 @@ final class AudioEngine: ObservableObject {
     func seek(to time: TimeInterval) {
         let wasPlaying = isPlaying
         
-        if useAUProcessor, let processor = auProcessor {
-            processor.seek(to: time)
-            DispatchQueue.main.async {
-                self.currentTime = time
-                if wasPlaying {
-                    self.isPlaying = processor.isPlaying
-                }
-            }
-        } else if let player = player {
-            player.pause()
-            player.currentTime = time
-            DispatchQueue.main.async {
-                self.currentTime = time
-                if wasPlaying {
-                    self.play()
-                } else {
-                    self.updateCurrentTime()
-                }
+        if useAUProcessor {
+            auProcessor?.seek(to: time)
+        } else {
+            player?.pause()
+            player?.currentTime = time
+        }
+        
+        DispatchQueue.main.async {
+            self.currentTime = time
+            if wasPlaying {
+                self.play()
+            } else {
+                self.updateCurrentTime()
             }
         }
         print("⏩ 跳转到 \(time)s")
@@ -208,58 +226,11 @@ final class AudioEngine: ObservableObject {
     
     func setVolume(_ value: Float) {
         volume = max(0, min(value, 1))
-        player?.volume = volume
-        auProcessor?.setVolume(volume)
-    }
-    
-    // 启用实时处理（切换到 AU 处理器）
-    func enableRealtimeProcessing(gains: [Float], hopSize: Int = 768) {
-        guard let fileURL = currentFileURL else {
-            print("⚠️ 未加载音频文件，无法启用实时处理")
-            return
+        if useAUProcessor {
+            auProcessor?.setVolume(volume)
+        } else {
+            player?.volume = volume
         }
-        
-        useAUProcessor = true
-        
-        // 重新加载文件到 AU 处理器
-        Task {
-            await loadFile(url: fileURL)
-            
-            // 启用音量动态平衡效果
-            if let processor = auProcessor {
-                processor.enableVolumeBalance(gains: gains, hopSize: hopSize)
-            }
-        }
-        
-        print("✓ 已启用实时音频处理")
-    }
-    
-    // 禁用实时处理（切换回普通播放器）
-    func disableRealtimeProcessing() {
-        let wasPlaying = isPlaying
-        let currentPos = currentTime
-        
-        stop()
-        useAUProcessor = false
-        
-        // 重新加载到普通播放器
-        if let fileURL = currentFileURL {
-            Task {
-                await loadFile(url: fileURL)
-                
-                // 恢复播放位置
-                if currentPos > 0 {
-                    seek(to: currentPos)
-                }
-                
-                // 如果之前在播放，继续播放
-                if wasPlaying {
-                    play()
-                }
-            }
-        }
-        
-        print("✓ 已禁用实时音频处理")
     }
     
     // MARK: - Timer 更新
@@ -280,12 +251,21 @@ final class AudioEngine: ObservableObject {
     }
     
     private func updateCurrentTime() {
-        guard let player = player else { return }
-        DispatchQueue.main.async {
-            self.currentTime = player.currentTime
-            if !player.isPlaying && self.isPlaying {
-                self.isPlaying = false
-                self.stopTimer()
+        if useAUProcessor {
+            if let au = auProcessor {
+                let time = au.getCurrentTime()
+                DispatchQueue.main.async {
+                    self.currentTime = time
+                }
+            }
+        } else {
+            guard let player = player else { return }
+            DispatchQueue.main.async {
+                self.currentTime = player.currentTime
+                if !player.isPlaying && self.isPlaying {
+                    self.isPlaying = false
+                    self.stopTimer()
+                }
             }
         }
     }

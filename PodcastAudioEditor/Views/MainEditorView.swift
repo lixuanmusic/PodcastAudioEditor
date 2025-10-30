@@ -109,9 +109,10 @@ struct MainEditorView: View {
                 viewModel.updatePlaybackFollow()
             }
             
-            // 更新当前增益显示
-            if audioProcessor.config.volumeBalanceEnabled && !audioProcessor.gains.isEmpty {
-                audioProcessor.updateCurrentGain(for: currentTime)
+            // 更新当前增益显示（从AudioEngine的AU处理器同步）
+            if audioProcessor.config.volumeBalanceEnabled {
+                // 增益值由AudioUnitProcessor实时更新，这里只需从AudioEngine同步
+                // 实际上AudioUnitProcessor会通过Published属性自动更新UI
             }
         }
         .onReceive(viewModel.$isPlaying) { isPlaying in

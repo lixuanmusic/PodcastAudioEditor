@@ -59,9 +59,10 @@ struct AudioProcessingPanel: View {
         if !analysisVM.isAnalyzing && !analysisVM.features.isEmpty && processor.config.volumeBalanceEnabled {
             let gains = processor.calculateVolumeGains(features: analysisVM.features)
             
-            // 启用实时处理
-            if !gains.isEmpty {
-                audioEngine.enableRealtimeProcessing(gains: gains)
+            // 如果功能已开启，切换到AU模式
+            if !gains.isEmpty, let fileURL = currentFileURL {
+                audioEngine.switchToAUProcessor(enabled: true, gains: gains, hopSize: 768)
+                audioEngine.setVolumeBalanceEnabled(true)
             }
         }
     }
@@ -84,20 +85,22 @@ struct AudioProcessingPanel: View {
                         .onChange(of: processor.config.volumeBalanceEnabled) { enabled in
                             if enabled {
                                 if !analysisVM.features.isEmpty {
-                                    // 自动计算增益
+                                    // 计算增益
                                     let gains = processor.calculateVolumeGains(features: analysisVM.features)
                                     
-                                    // 启用实时处理
-                                    if !gains.isEmpty {
-                                        audioEngine.enableRealtimeProcessing(gains: gains)
+                                    // 切换到AU处理模式并设置增益
+                                    if !gains.isEmpty, let fileURL = currentFileURL {
+                                        audioEngine.switchToAUProcessor(enabled: true, gains: gains, hopSize: 768)
+                                        audioEngine.setVolumeBalanceEnabled(true)
                                     }
                                 } else {
-                                    // 如果特征未提取，提示需要先分析
+                                    // 如果没有特征，关闭开关
                                     processor.config.volumeBalanceEnabled = false
                                 }
                             } else {
-                                // 禁用实时处理
-                                audioEngine.disableRealtimeProcessing()
+                                // 禁用AU效果器，切换回普通模式
+                                audioEngine.setVolumeBalanceEnabled(false)
+                                audioEngine.switchToAUProcessor(enabled: false)
                             }
                         }
                     
@@ -122,15 +125,15 @@ struct AudioProcessingPanel: View {
                                 Text("当前增益:")
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
-                                Text("\(String(format: "%+.1f", processor.currentGainDB)) dB")
+                                Text("\(String(format: "%+.1f", audioEngine.currentGainDB)) dB")
                                     .font(.caption)
                                     .fontWeight(.semibold)
                                     .monospacedDigit()
-                                    .foregroundStyle(gainColor(processor.currentGainDB))
+                                    .foregroundStyle(gainColor(audioEngine.currentGainDB))
                             }
                             
                             // 增益指示器（-12 到 +12 dB）
-                            GainIndicatorView(currentGain: processor.currentGainDB)
+                            GainIndicatorView(currentGain: audioEngine.currentGainDB)
                             
                             // 刻度标签
                             HStack {
