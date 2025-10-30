@@ -58,11 +58,8 @@ struct AudioProcessingPanel: View {
     private func checkAnalysisCompleted() {
         if !analysisVM.isAnalyzing && !analysisVM.features.isEmpty && processor.config.volumeBalanceEnabled {
             let gains = processor.calculateVolumeGains(features: analysisVM.features)
-            
-            // 如果功能已开启，设置增益并启用效果器
             if !gains.isEmpty {
                 audioEngine.setVolumeBalanceGains(gains, hopSize: 768)
-                audioEngine.setVolumeBalanceEnabled(true)
             }
         }
     }
@@ -85,10 +82,8 @@ struct AudioProcessingPanel: View {
                         .onChange(of: processor.config.volumeBalanceEnabled) { enabled in
                             if enabled {
                                 if !analysisVM.features.isEmpty {
-                                    // 计算增益
+                                    // 计算增益并设置到AudioEngine
                                     let gains = processor.calculateVolumeGains(features: analysisVM.features)
-                                    
-                                    // 设置增益并启用效果器
                                     if !gains.isEmpty {
                                         audioEngine.setVolumeBalanceGains(gains, hopSize: 768)
                                         audioEngine.setVolumeBalanceEnabled(true)
@@ -98,7 +93,7 @@ struct AudioProcessingPanel: View {
                                     processor.config.volumeBalanceEnabled = false
                                 }
                             } else {
-                                // 禁用效果器（不切换播放器）
+                                // 禁用效果器（旁通）
                                 audioEngine.setVolumeBalanceEnabled(false)
                             }
                         }

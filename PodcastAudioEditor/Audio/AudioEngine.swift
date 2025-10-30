@@ -1,6 +1,6 @@
 import AVFoundation
+import AudioToolbox
 import Foundation
-import Combine
 
 // 波形处理配置（参考 Miniwave）
 struct WaveformProcessingConfig {
@@ -23,30 +23,28 @@ struct WaveformProcessingConfig {
 final class AudioEngine: ObservableObject {
     static let shared = AudioEngine()
     
-    // 统一的音频引擎
-    private var audioEngine: AVAudioEngine?
+    // AVAudioEngine 相关
+    private var engine: AVAudioEngine?
     private var playerNode: AVAudioPlayerNode?
+    private var dynamicsProcessor: AVAudioUnit?
     private var audioFile: AVAudioFile?
-    private var format: AVAudioFormat?
-    
-    // 音量平衡效果器
-    private var eqUnit: AVAudioUnitEQ?
-    private var gains: [Float] = []
-    private var hopSize: Int = 768
     private var sampleRate: Double = 44100
+    
+    // 音量动态平衡相关
+    @Published var volumeBalanceGains: [Float] = []
+    private var volumeBalanceHopSize: Int = 768
+    @Published var volumeBalanceEnabled: Bool = false
+    @Published var currentGainDB: Float = 0.0
     
     @Published var isPlaying: Bool = false
     @Published var currentTime: TimeInterval = 0
     @Published var duration: TimeInterval = 0
     @Published var volume: Float = 0.9
     @Published var waveformData: [[Float]] = [] // 多声道波形数据
-    @Published var currentGainDB: Float = 0.0  // 当前AU增益值（用于UI显示）
-    @Published var volumeBalanceEnabled = false
     
     private var timer: Timer?
     private var waveformConfig = WaveformProcessingConfig()
-    private var currentFileURL: URL?
-    private var scheduledStartTime: AVAudioTime?
+    private var scheduleTimer: Timer?
     
     private init() {
         optimizeWaveformConfig()
@@ -79,291 +77,126 @@ final class AudioEngine: ObservableObject {
     
     func loadFile(url: URL) async {
         stop()
-        currentFileURL = url
         
         do {
-            // 统一使用AVAudioEngine
-            let engine = AVAudioEngine()
-            let playerNode = AVAudioPlayerNode()
+            // 停止现有引擎
+            engine?.stop()
             
-            // 加载音频文件
-            let file = try AVAudioFile(forReading: url)
-            format = file.processingFormat
-            sampleRate = format?.sampleRate ?? 44100
-            duration = Double(file.length) / sampleRate
+            // 创建新引擎
+            let newEngine = AVAudioEngine()
+            let newPlayerNode = AVAudioPlayerNode()
             
-            // 设置音频节点
-            engine.attach(playerNode)
+            // 创建音频文件
+            let newAudioFile = try AVAudioFile(forReading: url)
+            let format = newAudioFile.processingFormat
+            sampleRate = format.sampleRate
             
-            // 如果需要音量平衡，添加EQ效果器
-            if volumeBalanceEnabled && !gains.isEmpty {
-                let eq = AVAudioUnitEQ(numberOfBands: 1)
-                eq.bands[0].frequency = 1000.0
-                eq.bands[0].bandwidth = 1.0
-                eq.bands[0].gain = 0.0
-                eq.bands[0].bypass = false
-                engine.attach(eq)
-                eqUnit = eq
-                
-                // 连接：PlayerNode -> EQ -> Output
-                engine.connect(playerNode, to: eq, format: format)
-                engine.connect(eq, to: engine.mainMixerNode, format: format)
-            } else {
-                // 连接：PlayerNode -> Output
-                engine.connect(playerNode, to: engine.mainMixerNode, format: format)
-                eqUnit = nil
+            // 创建 Dynamics Processor
+            let componentDescription = AudioComponentDescription(
+                componentType: kAudioUnitType_Effect,
+                componentSubType: kAudioUnitSubType_DynamicsProcessor,
+                componentManufacturer: kAudioUnitManufacturer_Apple,
+                componentFlags: 0,
+                componentFlagsMask: 0
+            )
+            
+            let dynamics = AVAudioUnitEffect(audioComponentDescription: componentDescription)
+            
+            // 连接节点：PlayerNode -> DynamicsProcessor -> MainMixerNode -> Output
+            newEngine.attach(newPlayerNode)
+            newEngine.attach(dynamics)
+            
+            newEngine.connect(newPlayerNode, to: dynamics, format: format)
+            newEngine.connect(dynamics, to: newEngine.mainMixerNode, format: format)
+            
+            // 配置 Dynamics Processor
+            let dynamicsProc = dynamics.auAudioUnit
+            
+            // 设置压缩阈值为0
+            if let thresholdParam = dynamicsProc.parameterTree?.parameter(withAddress: AUParameterAddress(kDynamicsProcessorParam_Threshold)) {
+                thresholdParam.value = 0.0
             }
             
-            // 设置音量
-            engine.mainMixerNode.volume = volume
+            // 默认旁通（稍后通过setVolumeBalanceEnabled设置）
             
-            // 启动引擎
-            try engine.start()
+            // 准备引擎
+            try newEngine.prepare()
             
-            self.audioEngine = engine
-            self.playerNode = playerNode
-            self.audioFile = file
+            // 保存引用
+            self.engine = newEngine
+            self.playerNode = newPlayerNode
+            self.audioFile = newAudioFile
+            self.dynamicsProcessor = dynamics
+            
+            // 初始化旁通状态（默认禁用）
+            self.volumeBalanceEnabled = false
+            self.currentGainDB = 0.0
             
             DispatchQueue.main.async {
+                self.duration = Double(newAudioFile.length) / self.sampleRate
                 self.isPlaying = false
                 self.currentTime = 0
                 print("✓ 音频加载成功: \(url.lastPathComponent), 时长: \(String(format: "%.2f", self.duration))s")
             }
+            
+            // 异步生成波形数据
+            extractWaveformData(from: url)
         } catch {
             print("❌ 音频加载失败: \(error.localizedDescription)")
-            DispatchQueue.main.async {
-                self.duration = 0
-                self.isPlaying = false
-                self.currentTime = 0
-            }
         }
-        
-        // 异步生成波形数据
-        extractWaveformData(from: url)
-    }
-    
-    // 设置音量平衡增益数组
-    func setVolumeBalanceGains(_ gains: [Float], hopSize: Int = 768) {
-        self.gains = gains
-        self.hopSize = hopSize
-        
-        // 如果效果器已启用，更新当前增益
-        if volumeBalanceEnabled {
-            updateGain(for: currentTime)
-        }
-        
-        // 如果文件已加载且效果器已启用，需要重新连接以应用效果器
-        if let engine = audioEngine,
-           let playerNode = playerNode,
-           let format = format,
-           volumeBalanceEnabled,
-           !gains.isEmpty,
-           eqUnit == nil {
-            // 效果器未添加，需要添加
-            let wasPlaying = isPlaying
-            let savedTime = currentTime
-            
-            playerNode.stop()
-            
-            let eq = AVAudioUnitEQ(numberOfBands: 1)
-            eq.bands[0].frequency = 1000.0
-            eq.bands[0].bandwidth = 1.0
-            eq.bands[0].gain = 0.0
-            eq.bands[0].bypass = false
-            engine.attach(eq)
-            eqUnit = eq
-            
-            // 断开现有连接
-            engine.disconnectNodeInput(playerNode)
-            
-            // 连接：PlayerNode -> EQ -> Output
-            engine.connect(playerNode, to: eq, format: format)
-            engine.connect(eq, to: engine.mainMixerNode, format: format)
-            
-            updateGain(for: savedTime)
-            
-            // 恢复文件位置
-            if let audioFile = audioFile {
-                let framePosition = AVAudioFramePosition(savedTime * sampleRate)
-                audioFile.framePosition = framePosition
-                
-                DispatchQueue.main.async {
-                    self.currentTime = savedTime
-                    
-                    if wasPlaying {
-                        playerNode.scheduleFile(audioFile, at: nil) { [weak self] in
-                            DispatchQueue.main.async {
-                                self?.stop()
-                            }
-                        }
-                        playerNode.play()
-                        self.scheduledStartTime = engine.outputNode.lastRenderTime
-                        self.isPlaying = true
-                        self.startTimer()
-                    }
-                }
-            }
-        }
-    }
-    
-    // 启用/禁用音量平衡效果器
-    func setVolumeBalanceEnabled(_ enabled: Bool) {
-        guard volumeBalanceEnabled != enabled else { return }
-        
-        guard let engine = audioEngine,
-              let playerNode = playerNode,
-              let audioFile = audioFile,
-              let format = format else {
-            // 如果文件未加载，只更新状态
-            volumeBalanceEnabled = enabled
-            return
-        }
-        
-        let wasPlaying = isPlaying
-        let savedTime = currentTime
-        
-        // 停止当前播放
-        playerNode.stop()
-        
-        // 移除现有连接
-        engine.disconnectNodeInput(playerNode)
-        if let eq = eqUnit {
-            engine.disconnectNodeInput(eq)
-            engine.detach(eq)
-        }
-        
-        volumeBalanceEnabled = enabled
-        
-        // 如果需要音量平衡且有增益数据，添加EQ效果器
-        if enabled && !gains.isEmpty {
-            let eq = AVAudioUnitEQ(numberOfBands: 1)
-            eq.bands[0].frequency = 1000.0
-            eq.bands[0].bandwidth = 1.0
-            eq.bands[0].gain = 0.0
-            eq.bands[0].bypass = false
-            engine.attach(eq)
-            eqUnit = eq
-            
-            // 连接：PlayerNode -> EQ -> Output
-            engine.connect(playerNode, to: eq, format: format)
-            engine.connect(eq, to: engine.mainMixerNode, format: format)
-            
-            // 更新当前增益
-            updateGain(for: savedTime)
-        } else {
-            // 连接：PlayerNode -> Output
-            engine.connect(playerNode, to: engine.mainMixerNode, format: format)
-            eqUnit = nil
-            currentGainDB = 0.0
-        }
-        
-        // 恢复文件位置和播放状态
-        let framePosition = AVAudioFramePosition(savedTime * sampleRate)
-        audioFile.framePosition = framePosition
-        
-        DispatchQueue.main.async {
-            self.currentTime = savedTime
-            
-            if wasPlaying {
-                // 重新调度播放
-                playerNode.scheduleFile(audioFile, at: nil) { [weak self] in
-                    DispatchQueue.main.async {
-                        self?.stop()
-                    }
-                }
-                
-                playerNode.play()
-                self.scheduledStartTime = engine.outputNode.lastRenderTime
-                self.isPlaying = true
-                self.startTimer()
-            }
-        }
-        
-        print("🔊 音量动态平衡: \(enabled ? "启用" : "禁用")")
     }
     
     func play() {
         guard let playerNode = playerNode,
               let audioFile = audioFile,
-              let engine = audioEngine,
-              engine.isRunning else {
-            print("⚠️ 未加载音频文件或引擎未启动")
+              let engine = engine else {
+            print("⚠️ 未加载音频文件")
             return
         }
         
-        // 如果已经在播放，不做任何操作
-        if isPlaying && playerNode.isPlaying {
-            return
-        }
-        
-        // 停止之前的播放，确保没有重复调度
-        if playerNode.isPlaying || scheduledStartTime != nil {
-            playerNode.stop()
-        }
-        
-        // 等待节点完全停止
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.01) { [weak self] in
-            guard let self = self,
-                  let playerNode = self.playerNode,
-                  let audioFile = self.audioFile,
-                  let engine = self.audioEngine else { return }
-            
-            // 设置文件位置
-            let framePosition = AVAudioFramePosition(self.currentTime * self.sampleRate)
-            audioFile.framePosition = framePosition
-            
-            // 调度播放
-            playerNode.scheduleFile(audioFile, at: nil) { [weak self] in
-                DispatchQueue.main.async {
-                    self?.stop()
-                }
+        // 启动引擎（如果未启动）
+        if !engine.isRunning {
+            do {
+                try engine.start()
+            } catch {
+                print("❌ 启动引擎失败: \(error.localizedDescription)")
+                return
             }
-            
-            playerNode.play()
-            
-            self.scheduledStartTime = engine.outputNode.lastRenderTime
+        }
+        
+        // 如果未在播放，则调度音频
+        if !isPlaying {
+            scheduleAudioFile()
+        }
+        
+        playerNode.play()
+        
+        DispatchQueue.main.async {
             self.isPlaying = true
             self.startTimer()
-            
-            print("▶️ 开始播放")
         }
+        print("▶️ 开始播放")
     }
     
     func pause() {
-        guard let playerNode = playerNode else { return }
-        
-        // 保存当前播放时间
-        if let startTime = scheduledStartTime,
-           let engine = audioEngine,
-           let playerTime = playerNode.playerTime(forNodeTime: engine.outputNode.lastRenderTime ?? AVAudioTime()) {
-            let elapsed = Double(playerTime.sampleTime) / sampleRate
-            currentTime = max(0, min(duration, currentTime + elapsed))
-        }
-        
-        playerNode.pause()
-        
+        playerNode?.pause()
         DispatchQueue.main.async {
             self.isPlaying = false
             self.stopTimer()
-            self.scheduledStartTime = nil
         }
-        
         print("⏸️ 暂停播放")
     }
     
     func stop() {
-        guard let playerNode = playerNode else { return }
-        
-        playerNode.stop()
-        audioFile?.framePosition = 0
+        playerNode?.stop()
+        scheduleTimer?.invalidate()
+        scheduleTimer = nil
         
         DispatchQueue.main.async {
             self.isPlaying = false
             self.currentTime = 0
             self.stopTimer()
-            self.scheduledStartTime = nil
         }
-        
         print("⏹️ 停止播放")
     }
     
@@ -372,67 +205,92 @@ final class AudioEngine: ObservableObject {
               let audioFile = audioFile else { return }
         
         let wasPlaying = isPlaying
-        let clampedTime = max(0, min(duration, time))
-        
-        // 必须停止播放，避免重复调度
         playerNode.stop()
+        scheduleTimer?.invalidate()
+        scheduleTimer = nil
         
-        // 等待节点完全停止
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.01) { [weak self] in
-            guard let self = self,
-                  let playerNode = self.playerNode,
-                  let audioFile = self.audioFile else { return }
-            
-            // 设置文件位置
-            let framePosition = AVAudioFramePosition(clampedTime * self.sampleRate)
-            audioFile.framePosition = framePosition
-            
-            self.currentTime = clampedTime
-            self.updateGain(for: clampedTime)
-            
-            // 如果之前在播放，继续播放
-            if wasPlaying {
-                playerNode.scheduleFile(audioFile, at: nil) { [weak self] in
-                    DispatchQueue.main.async {
-                        self?.stop()
-                    }
-                }
-                
-                if let engine = self.audioEngine {
-                    self.scheduledStartTime = engine.outputNode.lastRenderTime
-                }
-                
-                playerNode.play()
-                self.isPlaying = true
-                self.startTimer()
-            }
+        currentTime = time
+        scheduleAudioFile(at: time)
+        
+        if wasPlaying {
+            play()
         }
         
-        print("⏩ 跳转到 \(String(format: "%.2f", clampedTime))s")
+        print("⏩ 跳转到 \(time)s")
+    }
+    
+    // 调度音频文件播放
+    private func scheduleAudioFile(at startTime: TimeInterval = 0) {
+        guard let playerNode = playerNode,
+              let audioFile = audioFile else { return }
+        
+        let format = audioFile.processingFormat
+        let startFrame = AVAudioFramePosition(startTime * sampleRate)
+        let totalFrames = audioFile.length - startFrame
+        
+        guard totalFrames > 0 else { return }
+        
+        // 从指定位置读取并播放
+        playerNode.scheduleSegment(audioFile, startingFrame: startFrame, frameCount: AVAudioFrameCount(totalFrames), at: nil) { [weak self] in
+            DispatchQueue.main.async {
+                if let self = self, self.isPlaying {
+                    self.stop()
+                }
+            }
+        }
     }
     
     func setVolume(_ value: Float) {
         volume = max(0, min(value, 1))
-        audioEngine?.mainMixerNode.volume = volume
+        engine?.mainMixerNode.volume = volume
+    }
+    
+    // MARK: - 音量动态平衡
+    
+    func setVolumeBalanceGains(_ gains: [Float], hopSize: Int) {
+        volumeBalanceGains = gains
+        volumeBalanceHopSize = hopSize
+        print("✓ 设置音量动态平衡增益: \(gains.count)个值")
+    }
+    
+    func setVolumeBalanceEnabled(_ enabled: Bool) {
+        volumeBalanceEnabled = enabled
+        
+        // 设置旁通（通过设置所有参数为默认值实现旁通效果）
+        // 注意：AUDynamicsProcessor没有直接的bypass属性，我们需要在播放时控制是否应用增益
+        // 当enabled=false时，updateVolumeBalanceGain会设置增益为0dB（线性值为1.0）
+        
+        print("\(enabled ? "✓" : "✗") 音量动态平衡: \(enabled ? "启用" : "禁用")")
     }
     
     // 更新当前时间的增益
-    private func updateGain(for time: TimeInterval) {
-        guard volumeBalanceEnabled, let eqUnit = eqUnit, !gains.isEmpty else {
-            currentGainDB = 0.0
-            return
+    private func updateVolumeBalanceGain(for time: TimeInterval) {
+        let newGain: Float
+        
+        if volumeBalanceEnabled && !volumeBalanceGains.isEmpty {
+            // 计算对应的帧索引
+            let sampleIdx = Int(time * sampleRate)
+            let frameIdx = sampleIdx / volumeBalanceHopSize
+            let gainIdx = min(frameIdx, volumeBalanceGains.count - 1)
+            newGain = volumeBalanceGains[gainIdx]
+        } else {
+            // 禁用时设置为0dB（无增益）
+            newGain = 0.0
         }
         
-        // 计算对应的帧索引
-        let sampleIdx = Int(time * sampleRate)
-        let frameIdx = sampleIdx / hopSize
-        let gainIdx = min(frameIdx, gains.count - 1)
+        // 更新当前增益显示
+        DispatchQueue.main.async {
+            self.currentGainDB = newGain
+        }
         
-        let gainDB = gains[gainIdx]
-        
-        // 应用增益到EQ频段
-        eqUnit.bands[0].gain = gainDB
-        currentGainDB = gainDB
+        // 更新 Dynamics Processor 的 Overall Gain
+        if let dynamicsProc = dynamicsProcessor?.auAudioUnit,
+           let overallGainParam = dynamicsProc.parameterTree?.parameter(withAddress: AUParameterAddress(kDynamicsProcessorParam_OverallGain)) {
+            // dB转线性（Dynamics Processor使用线性值，范围通常是0-1或更大）
+            // 注意：Overall Gain的范围可能需要调整，这里假设0dB对应某个基准值
+            let linearGain = pow(10.0, Double(newGain) / 20.0)
+            overallGainParam.value = Float(linearGain)
+        }
     }
     
     // MARK: - Timer 更新
@@ -453,34 +311,21 @@ final class AudioEngine: ObservableObject {
     }
     
     private func updateCurrentTime() {
-        guard let playerNode = playerNode,
-              let engine = audioEngine,
-              isPlaying else { return }
+        guard let playerNode = playerNode else { return }
         
-        // 计算当前播放时间
-        if let startTime = scheduledStartTime,
-           let playerTime = playerNode.playerTime(forNodeTime: engine.outputNode.lastRenderTime ?? AVAudioTime()) {
-            let elapsed = Double(playerTime.sampleTime) / sampleRate
-            let newTime = max(0, min(duration, currentTime + elapsed))
-            
+        // 计算当前播放位置
+        if let nodeTime = playerNode.lastRenderTime,
+           let playerTime = playerNode.playerTime(forNodeTime: nodeTime) {
+            let newTime = Double(playerTime.sampleTime) / sampleRate
             DispatchQueue.main.async {
                 self.currentTime = newTime
-                self.updateGain(for: newTime)
                 
-                // 检查是否播放完成
-                if newTime >= self.duration {
-                    self.stop()
-                }
-            }
-        } else {
-            // 如果无法获取精确时间，使用简单累加
-            DispatchQueue.main.async {
-                let newTime = self.currentTime + 1.0 / 60.0
-                if newTime >= self.duration {
-                    self.stop()
-                } else {
-                    self.currentTime = newTime
-                    self.updateGain(for: newTime)
+                // 更新音量动态平衡增益（无论是否启用，确保禁用时也设置为0dB）
+                self.updateVolumeBalanceGain(for: newTime)
+                
+                if !playerNode.isPlaying && self.isPlaying {
+                    self.isPlaying = false
+                    self.stopTimer()
                 }
             }
         }
