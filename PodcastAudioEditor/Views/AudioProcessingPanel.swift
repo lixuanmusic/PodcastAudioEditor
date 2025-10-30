@@ -59,9 +59,9 @@ struct AudioProcessingPanel: View {
         if !analysisVM.isAnalyzing && !analysisVM.features.isEmpty && processor.config.volumeBalanceEnabled {
             let gains = processor.calculateVolumeGains(features: analysisVM.features)
             
-            // 如果功能已开启，切换到AU模式
-            if !gains.isEmpty, let fileURL = currentFileURL {
-                audioEngine.switchToAUProcessor(enabled: true, gains: gains, hopSize: 768)
+            // 如果功能已开启，设置增益并启用效果器
+            if !gains.isEmpty {
+                audioEngine.setVolumeBalanceGains(gains, hopSize: 768)
                 audioEngine.setVolumeBalanceEnabled(true)
             }
         }
@@ -88,9 +88,9 @@ struct AudioProcessingPanel: View {
                                     // 计算增益
                                     let gains = processor.calculateVolumeGains(features: analysisVM.features)
                                     
-                                    // 切换到AU处理模式并设置增益
-                                    if !gains.isEmpty, let fileURL = currentFileURL {
-                                        audioEngine.switchToAUProcessor(enabled: true, gains: gains, hopSize: 768)
+                                    // 设置增益并启用效果器
+                                    if !gains.isEmpty {
+                                        audioEngine.setVolumeBalanceGains(gains, hopSize: 768)
                                         audioEngine.setVolumeBalanceEnabled(true)
                                     }
                                 } else {
@@ -98,9 +98,8 @@ struct AudioProcessingPanel: View {
                                     processor.config.volumeBalanceEnabled = false
                                 }
                             } else {
-                                // 禁用AU效果器，切换回普通模式
+                                // 禁用效果器（不切换播放器）
                                 audioEngine.setVolumeBalanceEnabled(false)
-                                audioEngine.switchToAUProcessor(enabled: false)
                             }
                         }
                     
