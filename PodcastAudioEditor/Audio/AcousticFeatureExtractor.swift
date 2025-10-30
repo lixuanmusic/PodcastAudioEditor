@@ -1,6 +1,39 @@
 import AVFoundation
 import Accelerate
 
+// 性能统计结构
+struct PerformanceMetrics {
+    var energyTime: TimeInterval = 0
+    var zcrTime: TimeInterval = 0
+    var spectralCentroidTime: TimeInterval = 0
+    var fftTime: TimeInterval = 0
+    var mfccTime: TimeInterval = 0
+    var frameCount: Int = 0
+    
+    var totalTime: TimeInterval {
+        energyTime + zcrTime + spectralCentroidTime + fftTime + mfccTime
+    }
+    
+    var report: String {
+        """
+        ⏱️  性能分析报告
+        ===================
+        总帧数: \(frameCount)
+        总耗时: \(String(format: "%.3f", totalTime))秒
+        
+        各特征耗时:
+        - 能量计算: \(String(format: "%.3f", energyTime))秒 (\(String(format: "%.1f", energyTime/totalTime*100))%)
+        - 零交叉率: \(String(format: "%.3f", zcrTime))秒 (\(String(format: "%.1f", zcrTime/totalTime*100))%)
+        - 谱质心: \(String(format: "%.3f", spectralCentroidTime))秒 (\(String(format: "%.1f", spectralCentroidTime/totalTime*100))%)
+        - FFT计算: \(String(format: "%.3f", fftTime))秒 (\(String(format: "%.1f", fftTime/totalTime*100))%)
+        - MFCC: \(String(format: "%.3f", mfccTime))秒 (\(String(format: "%.1f", mfccTime/totalTime*100))%)
+        
+        平均每帧耗时: \(String(format: "%.4f", totalTime/Double(frameCount)))毫秒
+        ===================
+        """
+    }
+}
+
 // 声学特征数据结构
 struct AcousticFeatures {
     let timestamp: Double  // 时间戳（秒）
@@ -23,6 +56,7 @@ final class AcousticFeatureExtractor {
     
     var features: [AcousticFeatures] = []
     var isProcessing: Bool = false
+    var performanceMetrics = PerformanceMetrics()  // 性能统计
     
     init?(audioFileURL: URL) {
         guard let audioFile = try? AVAudioFile(forReading: audioFileURL) else {
@@ -35,16 +69,23 @@ final class AcousticFeatureExtractor {
     // 异步提取所有特征
     func extractFeaturesAsync(onProgress: @escaping (Double) -> Void, completion: @escaping () -> Void) {
         isProcessing = true
+        performanceMetrics = PerformanceMetrics()  // 重置统计
         
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             defer {
                 DispatchQueue.main.async {
                     self?.isProcessing = false
+                    // 输出性能报告
+                    if let metrics = self?.performanceMetrics {
+                        print(metrics.report)
+                    }
                     completion()
                 }
             }
             
             guard let self = self else { return }
+            
+            let overallStart = CFAbsoluteTimeGetCurrent()
             
             do {
                 let features = try self.extractAllFeatures { progress in
@@ -52,6 +93,9 @@ final class AcousticFeatureExtractor {
                         onProgress(progress)
                     }
                 }
+                
+                let overallTime = CFAbsoluteTimeGetCurrent() - overallStart
+                print("⏱️  总分析耗时: \(String(format: "%.3f", overallTime))秒")
                 
                 DispatchQueue.main.async {
                     self.features = features
@@ -78,6 +122,10 @@ final class AcousticFeatureExtractor {
         var allFeatures: [AcousticFeatures] = []
         let totalSamples = Int(buffer.frameLength)
         let numFrames = (totalSamples - frameSize) / hopSize + 1
+        performanceMetrics.frameCount = numFrames
+        
+        print("📊 开始提取特征: \(numFrames)帧, \(totalSamples)采样点")
+        let overallStart = CFAbsoluteTimeGetCurrent()
         
         for frameIdx in 0..<numFrames {
             let startIdx = frameIdx * hopSize
@@ -89,11 +137,28 @@ final class AcousticFeatureExtractor {
             // 提取当前帧
             let frame = Array(UnsafeBufferPointer(start: channelData + startIdx, count: frameLength))
             
-            // 计算特征
+            // 计算特征（带计时）
+            let energyStart = CFAbsoluteTimeGetCurrent()
             let energy = calculateEnergy(frame: frame)
+            performanceMetrics.energyTime += CFAbsoluteTimeGetCurrent() - energyStart
+            
+            let zcrStart = CFAbsoluteTimeGetCurrent()
             let zcr = calculateZeroCrossingRate(frame: frame)
-            let spectralCentroid = calculateSpectralCentroid(frame: frame)
-            let mfcc = calculateMFCC(frame: frame)
+            performanceMetrics.zcrTime += CFAbsoluteTimeGetCurrent() - zcrStart
+            
+            // 先计算FFT（一次，用于多个特征）
+            let fftStart = CFAbsoluteTimeGetCurrent()
+            let fft = performFFT(frame: frame)
+            performanceMetrics.fftTime += CFAbsoluteTimeGetCurrent() - fftStart
+            
+            let centroidStart = CFAbsoluteTimeGetCurrent()
+            let spectralCentroid = calculateSpectralCentroidFromFFT(fft: fft)
+            performanceMetrics.spectralCentroidTime += CFAbsoluteTimeGetCurrent() - centroidStart
+            
+            let mfccStart = CFAbsoluteTimeGetCurrent()
+            let mfcc = calculateMFCCFromFFT(fft: fft, frame: frame)
+            performanceMetrics.mfccTime += CFAbsoluteTimeGetCurrent() - mfccStart
+            
             let isVoiced = energy > -40  // 简单判断：能量 > -40dB 认为有声
             
             let timestamp = Double(startIdx) / sampleRate
@@ -109,14 +174,23 @@ final class AcousticFeatureExtractor {
             allFeatures.append(feature)
             
             // 进度回调
-            if frameIdx % 10 == 0 {
-                let progress = Double(frameIdx) / Double(numFrames)
+            if frameIdx % 100 == 0 || frameIdx == numFrames - 1 {
+                let progress = Double(frameIdx + 1) / Double(numFrames)
                 onProgress(progress)
+                
+                // 每1000帧输出一次中间进度
+                if frameIdx % 1000 == 0 && frameIdx > 0 {
+                    let elapsed = CFAbsoluteTimeGetCurrent() - overallStart
+                    let avgTimePerFrame = elapsed / Double(frameIdx + 1)
+                    let estimatedTotal = avgTimePerFrame * Double(numFrames)
+                    let remaining = estimatedTotal - elapsed
+                    print("⏳ 进度: \(frameIdx)/\(numFrames)帧, 已用: \(String(format: "%.1f", elapsed))秒, 预计剩余: \(String(format: "%.1f", remaining))秒")
+                }
             }
         }
         
         onProgress(1.0)
-        print("✓ 特征提取完成: 共\(allFeatures.count)帧")
+        print("✓ 特征提取完成: 共\(allFeatures.count)个数据点")
         return allFeatures
     }
     
@@ -141,11 +215,8 @@ final class AcousticFeatureExtractor {
         return Float(zeroCount) / Float(frame.count - 1)
     }
     
-    // 计算谱质心（Hz）
-    private func calculateSpectralCentroid(frame: [Float]) -> Float {
-        // 计算FFT
-        let fft = performFFT(frame: frame)
-        
+    // 计算谱质心（Hz）- 使用已计算的FFT结果
+    private func calculateSpectralCentroidFromFFT(fft: [Float]) -> Float {
         guard fft.count > 0 else { return 0 }
         
         // 计算幅度谱
@@ -170,8 +241,8 @@ final class AcousticFeatureExtractor {
         return centroid / sumMag
     }
     
-    // 计算MFCC（梅尔频率倒谱系数，13维）
-    private func calculateMFCC(frame: [Float]) -> [Float] {
+    // 计算MFCC（梅尔频率倒谱系数，13维）- 使用已计算的FFT结果
+    private func calculateMFCCFromFFT(fft: [Float], frame: [Float]) -> [Float] {
         // 简化版MFCC：使用对数能量+频率特性
         // 完整实现需要Mel滤波组和离散余弦变换
         
@@ -181,7 +252,6 @@ final class AcousticFeatureExtractor {
         
         var mfcc: [Float] = Array(repeating: 0, count: 13)
         
-        let fft = performFFT(frame: frame)
         let binCount = fft.count / 2
         
         // 计算子频带能量
@@ -207,7 +277,8 @@ final class AcousticFeatureExtractor {
         mfcc[0] = energy
         mfcc[1] = energy / 2  // 简化导数近似
         mfcc[2] = calculateZeroCrossingRate(frame: frame)
-        mfcc[3] = calculateSpectralCentroid(frame: frame) / Float(sampleRate) * 2  // 归一化
+        let spectralCentroid = calculateSpectralCentroidFromFFT(fft: fft)
+        mfcc[3] = spectralCentroid / Float(sampleRate) * 2  // 归一化
         
         return mfcc
     }

@@ -22,7 +22,7 @@ struct MainEditorView: View {
                     Button {
                         if let url = currentFileURL {
                             analysisVM.analyzeAudioFile(url: url)
-                            showAnalysisWindow = true
+                            AnalysisWindowManager.shared.show(analysisVM: analysisVM)
                         }
                     } label: {
                         Label("分析", systemImage: "waveform.circle")
@@ -110,9 +110,6 @@ struct MainEditorView: View {
             if let url = notification.userInfo?["url"] as? URL {
                 currentFileURL = url
             }
-        }
-        .sheet(isPresented: $showAnalysisWindow) {
-            AudioAnalysisWindow(analysisVM: analysisVM)
         }
     }
 
