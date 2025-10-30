@@ -1,240 +1,353 @@
 import SwiftUI
 
 struct AudioAnalysisWindow: View {
-    let result: AudioAnalysisResult
-    @State private var selectedTab: String = "overview"
+    @ObservedObject var analysisVM: AudioAnalysisViewModel
+    @Environment(\.dismiss) var dismiss
+    
+    @State private var selectedTab = 0
+    @State private var selectedSegmentIndex: Int? = nil
     
     var body: some View {
         VStack(spacing: 0) {
             // 标题栏
             HStack {
                 Text("🎵 音频分析结果")
-                    .font(.headline)
+                    .font(.title2)
+                    .fontWeight(.bold)
                 Spacer()
-                Button("关闭") {
-                    NSApplication.shared.keyWindow?.close()
+                Button(action: { dismiss() }) {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.title3)
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+            }
+            .padding(12)
+            .background(Color(NSColor.controlBackgroundColor))
+            .border(width: 1, edges: [.bottom], color: Color(NSColor.separatorColor))
+            
+            if analysisVM.isAnalyzing {
+                // 分析进度
+                VStack(spacing: 12) {
+                    ProgressView(value: analysisVM.analysisProgress)
+                        .tint(.blue)
+                    Text("分析进度: \(Int(analysisVM.analysisProgress * 100))%")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                .padding(20)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+            } else {
+                TabView(selection: $selectedTab) {
+                    // Tab 1: 统计概览
+                    StatisticsView(analysisVM: analysisVM)
+                        .tabItem {
+                            Label("统计", systemImage: "chart.bar")
+                        }
+                        .tag(0)
+                    
+                    // Tab 2: 段落列表
+                    SegmentsListView(
+                        segments: analysisVM.segments,
+                        selectedIndex: $selectedSegmentIndex
+                    )
+                    .tabItem {
+                        Label("段落", systemImage: "list.bullet")
+                    }
+                    .tag(1)
+                    
+                    // Tab 3: 特征曲线
+                    FeaturesChartView(features: analysisVM.features)
+                    .tabItem {
+                        Label("特征", systemImage: "waveform.circle")
+                    }
+                    .tag(2)
                 }
             }
-            .padding()
-            .background(Color.gray.opacity(0.1))
-            
-            // 标签页
-            Picker("分析类型", selection: $selectedTab) {
-                Text("概览").tag("overview")
-                Text("静音段").tag("silences")
-                Text("响度变化").tag("loudness")
-                Text("音乐/发言").tag("speech_music")
-                Text("发言人").tag("speakers")
-            }
-            .pickerStyle(.segmented)
-            .padding()
-            
-            // 内容区
-            TabView(selection: $selectedTab) {
-                OverviewTab(result: result)
-                    .tag("overview")
-                
-                SilencesTab(silences: result.silences ?? [])
-                    .tag("silences")
-                
-                LoudnessTab(segments: result.loudness_segments ?? [])
-                    .tag("loudness")
-                
-                SpeechMusicTab(segments: result.speech_music ?? [])
-                    .tag("speech_music")
-                
-                SpeakersTab(speakers: result.speaker_changes ?? [])
-                    .tag("speakers")
-            }
-            
-            Spacer()
         }
         .frame(minWidth: 600, minHeight: 500)
     }
 }
 
-// MARK: - 概览选项卡
-struct OverviewTab: View {
-    let result: AudioAnalysisResult
+// MARK: - 统计概览视图
+struct StatisticsView: View {
+    @ObservedObject var analysisVM: AudioAnalysisViewModel
     
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
-                // 基本信息
-                GroupBox(label: Label("基本信息", systemImage: "info.circle")) {
-                    VStack(alignment: .leading, spacing: 8) {
+                // 时长统计
+                GroupBox(label: Label("时长统计", systemImage: "hourglass.circle")) {
+                    VStack(alignment: .leading, spacing: 10) {
+                        StatisticRow(
+                            label: "总语音时长",
+                            value: formatDuration(analysisVM.totalSpeechDuration),
+                            color: .blue
+                        )
+                        Divider()
+                        StatisticRow(
+                            label: "总音乐时长",
+                            value: formatDuration(analysisVM.totalMusicDuration),
+                            color: .green
+                        )
+                        Divider()
+                        StatisticRow(
+                            label: "总静音时长",
+                            value: formatDuration(analysisVM.totalSilenceDuration),
+                            color: .gray
+                        )
+                    }
+                    .padding(8)
+                }
+                
+                // 特征统计
+                GroupBox(label: Label("平均特征", systemImage: "chart.line.uptrend.xyaxis")) {
+                    VStack(alignment: .leading, spacing: 10) {
                         HStack {
-                            Text("总时长:")
+                            Text("平均能量")
                             Spacer()
-                            Text(formatTime(result.duration ?? 0))
+                            Text(String(format: "%.1f dB", analysisVM.averageEnergy))
+                                .fontWeight(.semibold)
+                                .monospaced()
                         }
+                        Divider()
                         HStack {
-                            Text("采样率:")
+                            Text("平均零交叉率")
                             Spacer()
-                            Text("\(result.sample_rate ?? 0) Hz")
+                            Text(String(format: "%.3f", analysisVM.averageZCR))
+                                .fontWeight(.semibold)
+                                .monospaced()
                         }
                     }
+                    .padding(8)
                 }
                 
-                // 分析统计
-                if let silences = result.silences {
-                    GroupBox(label: Label("静音段", systemImage: "speaker.slash")) {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text("数量: \(silences.count)")
-                            if !silences.isEmpty {
-                                let totalDuration = silences.reduce(0) { $0 + $1.duration }
-                                Text("总时长: \(formatTime(totalDuration))")
-                            }
+                // 段落统计
+                GroupBox(label: Label("段落统计", systemImage: "square.split.2x2")) {
+                    VStack(alignment: .leading, spacing: 10) {
+                        let (silenceCount, speechCount, musicCount) = getSegmentCounts()
+                        
+                        HStack {
+                            Text("语音段落")
+                            Spacer()
+                            Text("\(speechCount)")
+                                .fontWeight(.semibold)
+                                .foregroundStyle(.blue)
+                        }
+                        Divider()
+                        HStack {
+                            Text("音乐段落")
+                            Spacer()
+                            Text("\(musicCount)")
+                                .fontWeight(.semibold)
+                                .foregroundStyle(.green)
+                        }
+                        Divider()
+                        HStack {
+                            Text("静音段落")
+                            Spacer()
+                            Text("\(silenceCount)")
+                                .fontWeight(.semibold)
+                                .foregroundStyle(.gray)
                         }
                     }
-                }
-                
-                if let loudness = result.loudness_segments {
-                    GroupBox(label: Label("响度变化", systemImage: "waveform")) {
-                        Text("检测到 \(loudness.count) 处响度变化")
-                    }
-                }
-                
-                if let speechMusic = result.speech_music {
-                    GroupBox(label: Label("内容分类", systemImage: "music.note")) {
-                        VStack(alignment: .leading, spacing: 4) {
-                            let speechCount = speechMusic.filter { $0.type == "speech" }.count
-                            let musicCount = speechMusic.filter { $0.type == "music" }.count
-                            Text("发言: \(speechCount) 段")
-                            Text("音乐: \(musicCount) 段")
-                        }
-                    }
-                }
-                
-                if let speakers = result.speaker_changes {
-                    GroupBox(label: Label("发言人变化", systemImage: "person.2")) {
-                        Text("检测到 \(speakers.count) 次变化")
-                    }
+                    .padding(8)
                 }
                 
                 Spacer()
             }
-            .padding()
+            .padding(12)
+        }
+    }
+    
+    private func getSegmentCounts() -> (Int, Int, Int) {
+        let silence = analysisVM.segments.filter { $0.type == .silence }.count
+        let speech = analysisVM.segments.filter { $0.type == .speech }.count
+        let music = analysisVM.segments.filter { $0.type == .music }.count
+        return (silence, speech, music)
+    }
+}
+
+// MARK: - 统计行
+struct StatisticRow: View {
+    let label: String
+    let value: String
+    let color: Color
+    
+    var body: some View {
+        HStack {
+            Image(systemName: "circle.fill")
+                .font(.caption)
+                .foregroundStyle(color)
+            Text(label)
+            Spacer()
+            Text(value)
+                .fontWeight(.semibold)
+                .monospaced()
         }
     }
 }
 
-// MARK: - 静音段选项卡
-struct SilencesTab: View {
-    let silences: [Silence]
+// MARK: - 段落列表视图
+struct SegmentsListView: View {
+    let segments: [Segment]
+    @Binding var selectedIndex: Int?
     
     var body: some View {
-        List(silences, id: \.start) { silence in
+        List(segments.indices, id: \.self, selection: $selectedIndex) { idx in
+            let segment = segments[idx]
             VStack(alignment: .leading, spacing: 4) {
                 HStack {
-                    Text("📍")
-                    Text("\(formatTime(silence.start)) - \(formatTime(silence.end))")
-                        .font(.caption)
+                    segmentTypeIcon(segment.type)
+                    Text(segmentTypeName(segment.type))
+                        .fontWeight(.semibold)
                     Spacer()
-                    Text(formatTime(silence.duration))
+                    Text(String(format: "%.0f%%", segment.confidence * 100))
                         .font(.caption)
-                        .foregroundColor(.secondary)
+                        .foregroundStyle(.secondary)
+                }
+                
+                HStack(spacing: 8) {
+                    Text(String(format: "%.2f - %.2f s", segment.startTime, segment.endTime))
+                        .font(.caption)
+                        .monospaced()
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Text(formatDuration(segment.duration))
+                        .font(.caption)
+                        .fontWeight(.semibold)
                 }
             }
+            .padding(.vertical, 4)
         }
-        .listStyle(.plain)
+    }
+    
+    private func segmentTypeIcon(_ type: SegmentType) -> some View {
+        let (symbol, color) = segmentTypeSymbol(type)
+        return Image(systemName: symbol)
+            .font(.caption2)
+            .foregroundStyle(color)
+    }
+    
+    private func segmentTypeSymbol(_ type: SegmentType) -> (String, Color) {
+        switch type {
+        case .silence: return ("circle.slash", .gray)
+        case .speech: return ("mic.fill", .blue)
+        case .music: return ("music.note", .green)
+        case .noise: return ("waveform", .orange)
+        case .unknown: return ("questionmark.circle", .secondary)
+        }
+    }
+    
+    private func segmentTypeName(_ type: SegmentType) -> String {
+        switch type {
+        case .silence: return "静音"
+        case .speech: return "语音"
+        case .music: return "音乐"
+        case .noise: return "噪音"
+        case .unknown: return "未知"
+        }
     }
 }
 
-// MARK: - 响度变化选项卡
-struct LoudnessTab: View {
-    let segments: [LoudnessChange]
+// MARK: - 特征曲线视图
+struct FeaturesChartView: View {
+    let features: [AcousticFeatures]
+    @State private var selectedMetric = 0
+    
+    let metrics = ["能量", "零交叉率", "谱质心"]
     
     var body: some View {
-        List(segments, id: \.time) { segment in
-            VStack(alignment: .leading, spacing: 4) {
-                HStack {
-                    Text("📊")
-                    Text(formatTime(segment.time))
-                        .font(.caption)
-                    Spacer()
-                    Text(String(format: "%.2f", segment.magnitude))
-                        .font(.caption)
-                        .foregroundColor(.secondary)
+        VStack {
+            Picker("特征", selection: $selectedMetric) {
+                ForEach(metrics.indices, id: \.self) { idx in
+                    Text(metrics[idx]).tag(idx)
                 }
             }
+            .pickerStyle(.segmented)
+            .padding(12)
+            
+            Canvas { context, size in
+                drawChart(context: context, size: size)
+            }
+            .padding(12)
         }
-        .listStyle(.plain)
     }
-}
-
-// MARK: - 音乐/发言选项卡
-struct SpeechMusicTab: View {
-    let segments: [SpeechMusicSegment]
     
-    var body: some View {
-        List(segments, id: \.start) { segment in
-            VStack(alignment: .leading, spacing: 4) {
-                HStack {
-                    Text(segment.type == "speech" ? "🎤" : "🎵")
-                    Text("\(formatTime(segment.start)) - \(formatTime(segment.end))")
-                        .font(.caption)
-                    Spacer()
-                    Text(segment.type)
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                }
+    private func drawChart(context: GraphicsContext, size: CGSize) {
+        guard !features.isEmpty else { return }
+        
+        let padding: CGFloat = 40
+        let chartWidth = size.width - 2 * padding
+        let chartHeight = size.height - 2 * padding
+        
+        // 提取数据
+        let values: [Float]
+        let maxValue: Float
+        let minValue: Float
+        
+        switch selectedMetric {
+        case 0:  // 能量
+            values = features.map { $0.energy }
+            maxValue = values.max() ?? 0
+            minValue = values.min() ?? -80
+        case 1:  // ZCR
+            values = features.map { $0.zcr }
+            maxValue = 0.5
+            minValue = 0
+        case 2:  // 谱质心
+            values = features.map { $0.spectralCentroid }
+            maxValue = (values.max() ?? 8000) * 1.1
+            minValue = 0
+        default:
+            return
+        }
+        
+        // 绘制背景
+        context.fill(
+            Path(roundedRect: CGRect(x: padding, y: padding, width: chartWidth, height: chartHeight), cornerRadius: 4),
+            with: .color(.gray.opacity(0.05))
+        )
+        
+        // 绘制曲线
+        let range = maxValue - minValue
+        guard range > 0 else { return }
+        
+        var path = Path()
+        for (idx, value) in values.enumerated() {
+            let x = padding + CGFloat(idx) / CGFloat(values.count) * chartWidth
+            let normalizedValue = CGFloat(value - minValue) / CGFloat(range)
+            let y = padding + chartHeight * (1 - normalizedValue)
+            
+            if idx == 0 {
+                path.move(to: CGPoint(x: x, y: y))
+            } else {
+                path.addLine(to: CGPoint(x: x, y: y))
             }
         }
-        .listStyle(.plain)
-    }
-}
-
-// MARK: - 发言人选项卡
-struct SpeakersTab: View {
-    let speakers: [SpeakerChange]
-    
-    var body: some View {
-        List(speakers, id: \.time) { speaker in
-            VStack(alignment: .leading, spacing: 4) {
-                HStack {
-                    Text("👤")
-                    Text(formatTime(speaker.time))
-                        .font(.caption)
-                    Spacer()
-                    Text(String(format: "%.2f", speaker.distance))
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                }
-            }
-        }
-        .listStyle(.plain)
+        
+        context.stroke(path, with: .color(.blue), lineWidth: 1.5)
     }
 }
 
 // MARK: - 辅助函数
-func formatTime(_ seconds: Double) -> String {
+func formatDuration(_ seconds: Double) -> String {
     let minutes = Int(seconds) / 60
     let secs = Int(seconds) % 60
-    let ms = Int((seconds.truncatingRemainder(dividingBy: 1)) * 1000)
-    return String(format: "%02d:%02d.%03d", minutes, secs, ms)
+    return String(format: "%d:%02d", minutes, secs)
 }
 
-#Preview {
-    AudioAnalysisWindow(result: AudioAnalysisResult(
-        success: true,
-        error: nil,
-        duration: 180,
-        sample_rate: 22050,
-        silences: [
-            Silence(type: "silence", start: 0, end: 0.5, duration: 0.5),
-            Silence(type: "silence", start: 30, end: 31, duration: 1)
-        ],
-        loudness_segments: [
-            LoudnessChange(type: "loudness_change", time: 15, magnitude: 0.5)
-        ],
-        speech_music: [
-            SpeechMusicSegment(type: "speech", start: 0, end: 90, confidence: 0.9),
-            SpeechMusicSegment(type: "music", start: 90, end: 180, confidence: 0.8)
-        ],
-        speaker_changes: [
-            SpeakerChange(type: "speaker_change", time: 45, distance: 2.5)
-        ],
-        segments: []
-    ))
+extension View {
+    func border(width: CGFloat, edges: [Edge], color: Color) -> some View {
+        overlay(alignment: .top) {
+            if edges.contains(.top) {
+                color.frame(height: width)
+            }
+        }
+        .overlay(alignment: .bottom) {
+            if edges.contains(.bottom) {
+                color.frame(height: width)
+            }
+        }
+    }
 }

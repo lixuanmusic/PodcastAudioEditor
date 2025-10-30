@@ -3,9 +3,10 @@ import AppKit
 
 struct MainEditorView: View {
     @StateObject var viewModel = AudioPlayerViewModel()
+    @StateObject var analysisVM = AudioAnalysisViewModel()
     @State private var isWaveformHovered: Bool = false
-    @State private var analysisResult: AudioAnalysisResult?
-    @State private var showAnalysisWindow: Bool = false
+    @State private var showAnalysisWindow = false
+    @State private var currentFileURL: URL?
     
     var body: some View {
         ZStack(alignment: .bottom) {
@@ -16,6 +17,17 @@ struct MainEditorView: View {
                     } label: {
                         Label("导入", systemImage: "tray.and.arrow.down")
                     }
+                    
+                    // 分析按钮
+                    Button {
+                        if let url = currentFileURL {
+                            analysisVM.analyzeAudioFile(url: url)
+                            showAnalysisWindow = true
+                        }
+                    } label: {
+                        Label("分析", systemImage: "waveform.circle")
+                    }
+                    .disabled(currentFileURL == nil || analysisVM.isAnalyzing)
 
                     Button {
                         viewModel.togglePlayPause()
@@ -93,14 +105,15 @@ struct MainEditorView: View {
                 viewModel.resetPlaybackFollow()
             }
         }
-        .onReceive(NotificationCenter.default.publisher(for: .didAnalyzeAudio)) { notification in
-            if let result = notification.userInfo?["result"] as? AudioAnalysisResult {
-                self.analysisResult = result
-                self.showAnalysisWindow = true
-                self.openAnalysisWindow(result: result)
+        .background(EventHandlingView(viewModel: viewModel, isWaveformHovered: isWaveformHovered))
+        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("didImportAudioFile"))) { notification in
+            if let url = notification.userInfo?["url"] as? URL {
+                currentFileURL = url
             }
         }
-        .background(EventHandlingView(viewModel: viewModel, isWaveformHovered: isWaveformHovered))
+        .sheet(isPresented: $showAnalysisWindow) {
+            AudioAnalysisWindow(analysisVM: analysisVM)
+        }
     }
 
     private func timeString(_ t: Double) -> String {
@@ -114,20 +127,6 @@ struct MainEditorView: View {
         } else {
             return String(format: "%02d:%02d", m, s)
         }
-    }
-     
-    private func openAnalysisWindow(result: AudioAnalysisResult) {
-        let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 800, height: 600),
-            styleMask: [.titled, .closable, .resizable],
-            backing: .buffered,
-            defer: false
-        )
-        window.title = "音频分析结果"
-        window.contentView = NSHostingView(rootView: AudioAnalysisWindow(result: result))
-        window.center()
-        window.makeKeyAndOrderFront(nil)
-        NSApp.activate(ignoringOtherApps: true)
     }
 }
 
