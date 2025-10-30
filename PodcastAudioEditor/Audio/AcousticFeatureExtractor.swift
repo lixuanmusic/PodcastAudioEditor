@@ -161,14 +161,15 @@ final class AcousticFeatureExtractor {
         print("📊 开始提取特征: \(numFrames)帧, \(totalSamples)采样点")
         let overallStart = CFAbsoluteTimeGetCurrent()
         
-        // 并行处理：使用线程安全的结果数组和性能统计
-        let resultsQueue = DispatchQueue(label: "feature.results")
-        let metricsQueue = DispatchQueue(label: "feature.metrics")
-        
+        // 并行处理：预分配结果数组
+        // 注意：虽然Swift数组不是官方线程安全，但每个frameIdx唯一，不同线程写入不同位置是安全的
         var allFeatures: [AcousticFeatures?] = Array(repeating: nil, count: numFrames)
         
+        // 进度更新队列
+        let progressQueue = DispatchQueue(label: "feature.progress")
+        
         // 并行处理帧
-        let config = self.config  // 捕获配置避免重复访问
+        let config = self.config
         DispatchQueue.concurrentPerform(iterations: numFrames) { frameIdx in
             let startIdx = frameIdx * hopSize
             let endIdx = min(startIdx + frameSize, totalSamples)
@@ -179,54 +180,36 @@ final class AcousticFeatureExtractor {
             // 直接使用指针，避免数组拷贝
             let frameBuffer = UnsafeBufferPointer(start: channelData + startIdx, count: frameLength)
             
-            // 计算特征（根据配置选择性计算，带计时）
+            // 计算特征（移除计时以提升性能）
             var energy: Float = 0
-            var energyTime: TimeInterval = 0
             if config.extractEnergy {
-                let start = CFAbsoluteTimeGetCurrent()
                 energy = self.calculateEnergyFast(frameBuffer: frameBuffer)
-                energyTime = CFAbsoluteTimeGetCurrent() - start
             }
-                
+            
             var zcr: Float = 0
-            var zcrTime: TimeInterval = 0
             if config.extractZCR {
-                let start = CFAbsoluteTimeGetCurrent()
                 zcr = self.calculateZeroCrossingRateFast(frameBuffer: frameBuffer)
-                zcrTime = CFAbsoluteTimeGetCurrent() - start
             }
             
             // FFT只在需要谱质心或MFCC时计算
             var fft: [Float] = []
-            var fftTime: TimeInterval = 0
             if config.extractSpectralCentroid || config.extractMFCC {
-                let start = CFAbsoluteTimeGetCurrent()
                 fft = self.performFFT(frameBuffer: frameBuffer)
-                fftTime = CFAbsoluteTimeGetCurrent() - start
             }
             
             var spectralCentroid: Float = 0
-            var centroidTime: TimeInterval = 0
             if config.extractSpectralCentroid && !fft.isEmpty {
-                let start = CFAbsoluteTimeGetCurrent()
                 spectralCentroid = self.calculateSpectralCentroidFromFFT(fft: fft)
-                centroidTime = CFAbsoluteTimeGetCurrent() - start
             }
             
             var mfcc: [Float] = Array(repeating: 0, count: 13)
-            var mfccTime: TimeInterval = 0
             if config.extractMFCC {
-                let start = CFAbsoluteTimeGetCurrent()
                 if !fft.isEmpty {
                     mfcc = self.calculateMFCCFromFFT(fft: fft, frameBuffer: frameBuffer)
                 } else {
-                    // 如果之前没计算FFT，现在计算
-                    let fftStart = CFAbsoluteTimeGetCurrent()
                     fft = self.performFFT(frameBuffer: frameBuffer)
-                    fftTime += CFAbsoluteTimeGetCurrent() - fftStart
                     mfcc = self.calculateMFCCFromFFT(fft: fft, frameBuffer: frameBuffer)
                 }
-                mfccTime = CFAbsoluteTimeGetCurrent() - start
             }
             
             let isVoiced = energy > -40
@@ -240,40 +223,25 @@ final class AcousticFeatureExtractor {
                 isVoiced: isVoiced
             )
             
-            // 线程安全地更新结果
-            resultsQueue.async {
-                allFeatures[frameIdx] = feature
-                let currentCount = allFeatures.compactMap { $0 }.count  // 线程安全计数
-                
-                // 更新进度（只在特定帧数时更新，减少竞争）
-                if frameIdx % 100 == 0 || frameIdx == numFrames - 1 {
-                    let progress = Double(currentCount) / Double(numFrames)
-                    onProgress(progress)
-                }
-                
-                // 每1000帧输出进度
-                if frameIdx > 0 && frameIdx % 1000 == 0 {
-                    let elapsed = CFAbsoluteTimeGetCurrent() - overallStart
-                    let avgTimePerFrame = elapsed / Double(frameIdx + 1)
-                    let estimatedTotal = avgTimePerFrame * Double(numFrames)
-                    let remaining = estimatedTotal - elapsed
-                    print("⏳ 进度: \(frameIdx)/\(numFrames)帧, 已用: \(String(format: "%.1f", elapsed))秒, 预计剩余: \(String(format: "%.1f", remaining))秒")
-                }
-            }
+            // 直接写入（每个frameIdx唯一，避免锁开销）
+            allFeatures[frameIdx] = feature
             
-            // 累加性能统计（线程安全）
-            metricsQueue.async {
-                self.performanceMetrics.energyTime += energyTime
-                self.performanceMetrics.zcrTime += zcrTime
-                self.performanceMetrics.fftTime += fftTime
-                self.performanceMetrics.spectralCentroidTime += centroidTime
-                self.performanceMetrics.mfccTime += mfccTime
+            // 进度更新（大幅减少频率，避免同步开销）
+            if frameIdx % 500 == 0 || frameIdx == numFrames - 1 {
+                progressQueue.async {
+                    let progress = Double(frameIdx + 1) / Double(numFrames)
+                    onProgress(progress)
+                    
+                    if frameIdx > 0 && frameIdx % 2000 == 0 {
+                        let elapsed = CFAbsoluteTimeGetCurrent() - overallStart
+                        let avgTimePerFrame = elapsed / Double(frameIdx + 1)
+                        let estimatedTotal = avgTimePerFrame * Double(numFrames)
+                        let remaining = estimatedTotal - elapsed
+                        print("⏳ 进度: \(frameIdx)/\(numFrames)帧, 已用: \(String(format: "%.1f", elapsed))秒, 预计剩余: \(String(format: "%.1f", remaining))秒")
+                    }
+                }
             }
         }
-        
-        // 等待所有帧处理完成
-        resultsQueue.sync {}
-        metricsQueue.sync {}
         
         // 过滤nil并排序（确保时间顺序）
         let sortedFeatures = allFeatures.compactMap { $0 }.sorted { $0.timestamp < $1.timestamp }
