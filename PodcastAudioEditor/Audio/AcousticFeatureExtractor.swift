@@ -51,8 +51,8 @@ struct AcousticFeatures {
 final class AcousticFeatureExtractor {
     private let audioFile: AVAudioFile
     private let sampleRate: Double
-    private let frameSize: Int = 512  // 分帧大小
-    private let hopSize: Int = 256    // 帧移
+    private let frameSize: Int = 1024  // 分帧大小（约23ms @ 44100Hz，满足语音分析需求）
+    private let hopSize: Int = 512     // 帧移（50%重叠，保持平滑过渡）
     
     var features: [AcousticFeatures] = []
     var isProcessing: Bool = false
