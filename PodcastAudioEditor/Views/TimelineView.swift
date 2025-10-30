@@ -3,30 +3,38 @@ import SwiftUI
 struct TimelineRuler: View {
     let currentTime: Double
     let duration: Double
+    let scale: CGFloat
+    let scrollOffset: CGFloat
 
     var body: some View {
         GeometryReader { geo in
             let width = geo.size.width
-            let marks = tickMarks(for: duration, pixelWidth: width)
+            let totalScaledWidth = width * scale
+            let marks = tickMarks(for: duration, pixelWidth: totalScaledWidth)
 
             ZStack(alignment: .topLeading) {
                 ForEach(marks.indices, id: \.self) { i in
                     let mark = marks[i]
-                    let x = CGFloat(mark.position) * width
-                    Path { p in
-                        p.move(to: CGPoint(x: x, y: 0))
-                        p.addLine(to: CGPoint(x: x, y: mark.major ? 20 : 10))
-                    }
-                    .stroke(Color.secondary.opacity(0.5), lineWidth: mark.major ? 1.0 : 0.5)
+                    let x = CGFloat(mark.position) * totalScaledWidth - scrollOffset
+                    
+                    // 只绘制可见范围内的刻度
+                    if x >= -10 && x <= width + 10 {
+                        Path { p in
+                            p.move(to: CGPoint(x: x, y: 0))
+                            p.addLine(to: CGPoint(x: x, y: mark.major ? 20 : 10))
+                        }
+                        .stroke(Color.secondary.opacity(0.5), lineWidth: mark.major ? 1.0 : 0.5)
 
-                    if mark.major {
-                        Text(mark.label)
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                            .position(x: x + 12, y: 24)
+                        if mark.major {
+                            Text(mark.label)
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                                .position(x: x + 12, y: 24)
+                        }
                     }
                 }
             }
+            .clipped()
         }
         .frame(height: 28)
     }

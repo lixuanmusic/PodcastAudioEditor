@@ -6,83 +6,78 @@ struct MainEditorView: View {
     @State private var isWaveformHovered: Bool = false
     
     var body: some View {
-        VStack(spacing: 0) {
-            HStack(spacing: 12) {
-                Button {
-                    AudioFileManager.shared.presentOpenPanel()
-                } label: {
-                    Label("导入", systemImage: "tray.and.arrow.down")
-                }
+        ZStack(alignment: .bottom) {
+            VStack(spacing: 0) {
+                HStack(spacing: 12) {
+                    Button {
+                        AudioFileManager.shared.presentOpenPanel()
+                    } label: {
+                        Label("导入", systemImage: "tray.and.arrow.down")
+                    }
 
-                Button {
-                    viewModel.togglePlayPause()
-                } label: {
-                    Image(systemName: viewModel.isPlaying ? "pause.fill" : "play.fill")
-                }
-                .keyboardShortcut(.space, modifiers: [])
+                    Button {
+                        viewModel.togglePlayPause()
+                    } label: {
+                        Image(systemName: viewModel.isPlaying ? "pause.fill" : "play.fill")
+                    }
+                    .keyboardShortcut(.space, modifiers: [])
 
-                Button {
-                    viewModel.seekToBeginning()
-                } label: {
-                    Image(systemName: "backward.end.fill")
-                }
+                    Button {
+                        viewModel.seekToBeginning()
+                    } label: {
+                        Image(systemName: "backward.end.fill")
+                    }
 
-                HStack {
-                    Image(systemName: "speaker.wave.2.fill")
-                    Slider(value: Binding(get: {
-                        Double(viewModel.audioEngine.volume)
-                    }, set: { viewModel.audioEngine.setVolume(Float($0)) }), in: 0...1)
-                    .frame(width: 160)
-                }
-
-                Spacer()
-
-                Text(timeString(viewModel.currentTime))
-                Text("/")
-                Text(timeString(viewModel.duration)).foregroundStyle(.secondary)
-                
-                // 缩放级别显示
-                if viewModel.waveformScale > 1.0 {
-                    Text("缩放: \(Int(viewModel.waveformScale * 100))%")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-            }
-            .padding(12)
-
-            Divider()
-
-            TimelineRuler(currentTime: viewModel.currentTime, duration: viewModel.duration)
-                .frame(height: 28)
-                .padding(.horizontal, 12)
-
-            WaveformView(viewModel: viewModel, isHovered: $isWaveformHovered)
-                .frame(minHeight: 180)
-                .padding(.horizontal, 12)
-                .background(Color(NSColor.controlBackgroundColor))
-                .overlay(
-                    Group {
-                        if viewModel.waveformScale > 1.0 {
-                            HorizontalScrollbar(viewModel: viewModel)
-                                .frame(height: 12)
-                                .padding(.horizontal, 12)
-                                .padding(.bottom, 6)
-                        }
-                    }, alignment: .bottom
-                )
-            
-            // Toast 提示
-            if viewModel.showToast {
-                VStack {
                     HStack {
-                        Spacer()
+                        Image(systemName: "speaker.wave.2.fill")
+                        Slider(value: Binding(get: {
+                            Double(viewModel.audioEngine.volume)
+                        }, set: { viewModel.audioEngine.setVolume(Float($0)) }), in: 0...1)
+                        .frame(width: 160)
+                    }
+
+                    Spacer()
+
+                    Text(timeString(viewModel.currentTime))
+                    Text("/")
+                    Text(timeString(viewModel.duration)).foregroundStyle(.secondary)
+                    
+                    // 缩放级别显示
+                    if viewModel.waveformScale > 1.0 {
+                        Text("缩放: \(Int(viewModel.waveformScale * 100))%")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .padding(12)
+
+                Divider()
+
+                TimelineRuler(currentTime: viewModel.currentTime, duration: viewModel.duration, scale: viewModel.waveformScale, scrollOffset: viewModel.waveformScrollOffset)
+                    .frame(height: 28)
+
+                ZStack(alignment: .topTrailing) {
+                    WaveformView(viewModel: viewModel, isHovered: $isWaveformHovered)
+                        .frame(minHeight: 180)
+                        .background(Color(NSColor.controlBackgroundColor))
+                    
+                    // Toast 提示 - 使用 overlay 不占用空间
+                    if viewModel.showToast {
                         ToastView(message: viewModel.toastMessage)
                             .padding(.top, 12)
                             .padding(.trailing, 20)
+                            .transition(.move(edge: .top).combined(with: .opacity))
                     }
-                    Spacer()
                 }
-                .allowsHitTesting(false)
+                .frame(minHeight: 180)
+                
+                Spacer()
+            }
+            
+            // 滚动条 - 贴到窗口下边缘，不占用VStack空间
+            if viewModel.waveformScale > 1.0 {
+                HorizontalScrollbar(viewModel: viewModel)
+                    .frame(height: 12)
             }
         }
         .onReceive(viewModel.$currentTime.throttle(for: .milliseconds(100), scheduler: RunLoop.main, latest: true)) { _ in

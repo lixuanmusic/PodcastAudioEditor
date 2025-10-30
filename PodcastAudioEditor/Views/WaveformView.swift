@@ -60,7 +60,6 @@ struct WaveformView: View {
             }
         }
         .clipShape(RoundedRectangle(cornerRadius: 4))
-        .animation((viewModel.isAnimatingSeek || viewModel.isZooming || viewModel.isScrolling) ? nil : .easeInOut(duration: 0.3), value: viewModel.waveformScrollOffset)
         .onHover { hovering in
             isHovered = hovering
         }

@@ -142,7 +142,8 @@ class AudioPlayerViewModel: ObservableObject {
         setWaveformScrollOffset(newOffset)
         resetPlaybackFollow()
         
-        DispatchQueue.main.async {
+        // 延长 isScrolling 的持续时间，确保滚动动作完全完成后再启用动画
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
             self.isScrolling = false
         }
     }
