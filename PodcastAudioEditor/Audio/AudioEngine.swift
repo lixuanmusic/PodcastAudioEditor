@@ -209,14 +209,20 @@ final class AudioEngine: ObservableObject {
         scheduleTimer?.invalidate()
         scheduleTimer = nil
         
-        currentTime = time
-        scheduleAudioFile(at: time)
+        // 确保时间在有效范围内
+        let clampedTime = max(0, min(time, duration))
+        currentTime = clampedTime
+        
+        // 立即更新增益（避免在seek后使用旧时间计算增益）
+        updateVolumeBalanceGain(for: clampedTime)
+        
+        scheduleAudioFile(at: clampedTime)
         
         if wasPlaying {
             play()
         }
         
-        print("⏩ 跳转到 \(time)s")
+        print("⏩ 跳转到 \(clampedTime)s")
     }
     
     // 调度音频文件播放
@@ -224,11 +230,15 @@ final class AudioEngine: ObservableObject {
         guard let playerNode = playerNode,
               let audioFile = audioFile else { return }
         
-        let format = audioFile.processingFormat
-        let startFrame = AVAudioFramePosition(startTime * sampleRate)
+        // 确保时间在有效范围内
+        let clampedTime = max(0, min(startTime, duration))
+        let startFrame = AVAudioFramePosition(clampedTime * sampleRate)
         let totalFrames = audioFile.length - startFrame
         
-        guard totalFrames > 0 else { return }
+        guard totalFrames > 0 && startFrame >= 0 && startFrame < audioFile.length else {
+            print("⚠️ 无效的seek位置: \(startTime)s, frame: \(startFrame), total: \(audioFile.length)")
+            return
+        }
         
         // 从指定位置读取并播放
         playerNode.scheduleSegment(audioFile, startingFrame: startFrame, frameCount: AVAudioFrameCount(totalFrames), at: nil) { [weak self] in
@@ -268,10 +278,29 @@ final class AudioEngine: ObservableObject {
         let newGain: Float
         
         if volumeBalanceEnabled && !volumeBalanceGains.isEmpty {
+            // 确保时间在有效范围内
+            guard time >= 0 && time <= duration else {
+                newGain = 0.0
+                return
+            }
+            
             // 计算对应的帧索引
             let sampleIdx = Int(time * sampleRate)
+            guard sampleIdx >= 0 else {
+                newGain = 0.0
+                return
+            }
+            
             let frameIdx = sampleIdx / volumeBalanceHopSize
-            let gainIdx = min(frameIdx, volumeBalanceGains.count - 1)
+            // 确保索引在有效范围内
+            let gainIdx = max(0, min(frameIdx, volumeBalanceGains.count - 1))
+            
+            guard gainIdx >= 0 && gainIdx < volumeBalanceGains.count else {
+                print("⚠️ 增益索引越界: \(gainIdx), 数组大小: \(volumeBalanceGains.count)")
+                newGain = 0.0
+                return
+            }
+            
             newGain = volumeBalanceGains[gainIdx]
         } else {
             // 禁用时设置为0dB（无增益）
@@ -316,12 +345,21 @@ final class AudioEngine: ObservableObject {
         // 计算当前播放位置
         if let nodeTime = playerNode.lastRenderTime,
            let playerTime = playerNode.playerTime(forNodeTime: nodeTime) {
-            let newTime = Double(playerTime.sampleTime) / sampleRate
+            let sampleTime = Double(playerTime.sampleTime)
+            
+            // 确保sampleTime非负
+            guard sampleTime >= 0 else { return }
+            
+            let newTime = sampleTime / sampleRate
+            
+            // 确保时间在有效范围内
+            let clampedTime = max(0, min(newTime, duration))
+            
             DispatchQueue.main.async {
-                self.currentTime = newTime
+                self.currentTime = clampedTime
                 
                 // 更新音量动态平衡增益（无论是否启用，确保禁用时也设置为0dB）
-                self.updateVolumeBalanceGain(for: newTime)
+                self.updateVolumeBalanceGain(for: clampedTime)
                 
                 if !playerNode.isPlaying && self.isPlaying {
                     self.isPlaying = false
