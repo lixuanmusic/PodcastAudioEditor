@@ -61,6 +61,12 @@ struct MainEditorView: View {
                     .frame(maxHeight: .infinity)
                     .background(Color(NSColor.controlBackgroundColor))
                 
+                // 音量自动化线叠加在波形上
+                GeometryReader { geo in
+                    AutomationView(viewModel: viewModel, geometry: geo)
+                        .frame(maxHeight: .infinity)
+                }
+                
                 // Toast 提示 - 使用 overlay 不占用空间
                 if viewModel.showToast {
                     ToastView(message: viewModel.toastMessage)
@@ -73,7 +79,7 @@ struct MainEditorView: View {
             }
             
             // 滚动条 - 完全贴到窗口下边缘
-            if viewModel.waveformScale > 1.0 {
+            if viewModel.isWaveformScrollable {
                 HorizontalScrollbar(viewModel: viewModel)
                     .frame(height: 12)
                     .offset(y: 6) // 下移6px完全贴到窗口底部

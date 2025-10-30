@@ -1,42 +1,47 @@
 import SwiftUI
+import AVFoundation
 import Combine
 
 class AudioPlayerViewModel: ObservableObject {
-    @Published var audioEngine = AudioEngine.shared
+    @Published var audioEngine = AudioEngine.shared // Use the shared instance
+    @Published var volumeAutomation = VolumeAutomation()  // 新增音量自动化
     
-    // 播放状态
-    @Published var isPlaying = false
+    @Published var isPlaying: Bool = false
     @Published var currentTime: TimeInterval = 0
     @Published var duration: TimeInterval = 0
-    @Published var hasAudioFile: Bool = false
-    
-    // 波形缩放相关（参考 Miniwave）
     @Published var waveformScale: CGFloat = 1.0
     @Published var waveformScrollOffset: CGFloat = 0.0
-    @Published var waveformWidth: CGFloat = 800
+    @Published var hasAudioFile: Bool = false
     
-    private let minZoomScale: CGFloat = 1.0
-    private let maxZoomScale: CGFloat = 20.0
-    
-    // 缩放状态标记
+    // Zoom/Scroll states for animation control
     @Published var isZooming: Bool = false
     @Published var isScrolling: Bool = false
-    
-    // DAW风格播放条跟随
-    @Published var followPlayback: Bool = true
-    @Published var isPlaybackCentered: Bool = false
-    @Published var isScrollbarDragging: Bool = false
     @Published var isAnimatingSeek: Bool = false
+    @Published var isScrollbarDragging: Bool = false
     
+    // Playback follow
+    @Published var followPlayback: Bool = true
+    @Published var waveformWidth: CGFloat = 800 // Actual width will be updated by GeometryReader
+    private var isPlaybackCentered: Bool = false
     private var playbackFollowTimer: Timer?
-    private var seekAnimationTimer: Timer?
-    private var isWaitingForFollow: Bool = false
-    private var lastPlaybackPosition: CGFloat = 0
     
-    // Toast 提示
+    // Toast
     @Published var showToast: Bool = false
     @Published var toastMessage: String = ""
     private var toastTimer: Timer?
+    
+    // 动态最小缩放（适配全长）
+    private var minPxPerSec: CGFloat { 50.0 }
+    private var minZoomScale: CGFloat {
+        guard duration > 0, waveformWidth > 0 else { return 1.0 }
+        let minWidth = CGFloat(duration) * minPxPerSec
+        let baseWidth = max(waveformWidth, minWidth)
+        let fitScale = waveformWidth / baseWidth
+        // 移除固定下限，允许缩小到完整长度所需比例
+        return min(fitScale, 1.0)
+    }
+    private let maxZoomScale: CGFloat = 20.0
+    private var didFitAfterLoad: Bool = false
     
     private var cancellables: Set<AnyCancellable> = []
     
@@ -45,35 +50,44 @@ class AudioPlayerViewModel: ObservableObject {
     }
     
     private func setupBindings() {
-        // 绑定播放状态
         audioEngine.$isPlaying
-            .receive(on: DispatchQueue.main)
-            .sink { [weak self] isPlaying in
-                self?.isPlaying = isPlaying
-            }
-            .store(in: &cancellables)
+            .assign(to: &$isPlaying)
         
-        // 绑定时间
         audioEngine.$currentTime
-            .receive(on: DispatchQueue.main)
-            .sink { [weak self] time in
-                self?.currentTime = time
+            .assign(to: &$currentTime)
+        
+        audioEngine.$duration
+            .sink { [weak self] d in
+                guard let self = self else { return }
+                self.duration = d
+                self.maybeFitToFullLength()
             }
             .store(in: &cancellables)
         
-        // 绑定时长
-        audioEngine.$duration
-            .receive(on: DispatchQueue.main)
-            .sink { [weak self] duration in
-                self?.duration = duration
-                if duration > 0 {
-                    self?.hasAudioFile = true
+        audioEngine.$waveformData
+            .map { !$0.isEmpty }
+            .sink { [weak self] has in
+                guard let self = self else { return }
+                self.hasAudioFile = has
+                if has {
+                    // 新文件已生成波形数据，重置适配标记并适配全长
+                    self.didFitAfterLoad = false
+                    self.volumeAutomation.clear()  // 清除旧自动化数据
+                    self.maybeFitToFullLength()
                 }
             }
             .store(in: &cancellables)
     }
     
-    // MARK: - 播放控制
+    private func maybeFitToFullLength() {
+        // 首次加载后，自动适配到全长
+        guard hasAudioFile, duration > 0 else { return }
+        if !didFitAfterLoad {
+            waveformScale = minZoomScale
+            setWaveformScrollOffset(0)
+            didFitAfterLoad = true
+        }
+    }
     
     func togglePlayPause() {
         if isPlaying {
@@ -85,14 +99,41 @@ class AudioPlayerViewModel: ObservableObject {
     
     func seekToBeginning() {
         audioEngine.seek(to: 0)
-        showToast(message: "回到开头")
     }
     
-    // MARK: - 波形缩放（参考 Miniwave）
+    func showToast(message: String) {
+        toastTimer?.invalidate()
+        toastMessage = message
+        showToast = true
+        
+        toastTimer = Timer.scheduledTimer(withTimeInterval: 3.0, repeats: false) { _ in
+            DispatchQueue.main.async {
+                self.showToast = false
+            }
+        }
+    }
+    
+    // MARK: - Waveform Zoom & Scroll
+    
+    func updateWaveformWidth(_ width: CGFloat) {
+        waveformWidth = width
+        // 窗口变化时，确保不会小于动态最小缩放（保持可见）
+        if waveformScale < minZoomScale {
+            waveformScale = minZoomScale
+            setWaveformScrollOffset(0)
+        }
+    }
+    
+    func setWaveformScrollOffset(_ offset: CGFloat) {
+        let actualWaveformWidth = calculateActualWaveformWidth()
+        let maxScrollOffset = max(0, actualWaveformWidth - waveformWidth)
+        waveformScrollOffset = max(0, min(maxScrollOffset, offset))
+    }
     
     func zoomWaveformAtPoint(delta: CGFloat, mouseX: CGFloat, waveformWidth: CGFloat) {
         let zoomFactor = delta > 0 ? 1.1 : 0.9
-        let newScale = max(minZoomScale, min(maxZoomScale, waveformScale * zoomFactor))
+        let newScaleRaw = waveformScale * zoomFactor
+        let newScale = max(minZoomScale, min(maxZoomScale, newScaleRaw))
         
         guard newScale != waveformScale else {
             if waveformScale >= maxZoomScale && delta > 0 {
@@ -105,19 +146,15 @@ class AudioPlayerViewModel: ObservableObject {
         
         isZooming = true
         
-        // 计算鼠标位置对应的波形位置百分比
         let oldActualWidth = calculateActualWaveformWidth()
         let mousePositionInWaveformRatio = (mouseX + waveformScrollOffset) / oldActualWidth
         
-        withAnimation(.none) {
-            waveformScale = newScale
-            
-            // 重新计算 scrollOffset 以保持鼠标位置不变
-            let newActualWidth = calculateActualWaveformWidth()
-            let newMousePositionInWaveform = mousePositionInWaveformRatio * newActualWidth
-            let newScrollOffset = newMousePositionInWaveform - mouseX
-            setWaveformScrollOffset(newScrollOffset)
-        }
+        waveformScale = newScale
+        
+        let newActualWidth = calculateActualWaveformWidth()
+        let newMousePositionInWaveform = mousePositionInWaveformRatio * newActualWidth
+        let newScrollOffset = newMousePositionInWaveform - mouseX
+        setWaveformScrollOffset(newScrollOffset)
         
         adjustScrollOffsetAfterZoom()
         resetPlaybackFollow()
@@ -130,48 +167,15 @@ class AudioPlayerViewModel: ObservableObject {
         }
     }
     
-    func resetWaveformZoom() {
-        waveformScale = 1.0
-        waveformScrollOffset = 0.0
-        showToast(message: "重置缩放")
-    }
-    
     func scrollWaveform(delta: CGFloat) {
         isScrolling = true
         let newOffset = waveformScrollOffset + delta
         setWaveformScrollOffset(newOffset)
         resetPlaybackFollow()
         
-        // 延长 isScrolling 的持续时间，确保滚动动作完全完成后再启用动画
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
             self.isScrolling = false
         }
-    }
-    
-    // WaveSurfer 逻辑：基于音频时长和窗口宽度计算实际波形宽度
-    private func calculateActualWaveformWidth() -> CGFloat {
-        guard duration > 0 else { return waveformWidth }
-        
-        // minPxPerSec 是最小像素密度，如果窗口更宽则填满窗口
-        let minPxPerSec: CGFloat = 50.0
-        let minWidth = CGFloat(duration) * minPxPerSec
-        
-        // scale=1.0 时，波形填满窗口（或使用最小宽度，取较大值）
-        let baseWidth = max(waveformWidth, minWidth)
-        
-        // 应用缩放因子
-        let result = baseWidth * waveformScale
-        
-        // Debug 输出
-        print("📊 波形宽度计算: duration=\(duration)s, windowWidth=\(waveformWidth), minWidth=\(minWidth), baseWidth=\(baseWidth), scale=\(waveformScale), result=\(result)")
-        
-        return result
-    }
-    
-    func setWaveformScrollOffset(_ offset: CGFloat) {
-        let actualWaveformWidth = calculateActualWaveformWidth()
-        let maxScrollOffset = max(0, actualWaveformWidth - waveformWidth)
-        waveformScrollOffset = max(0, min(maxScrollOffset, offset))
     }
     
     private func adjustScrollOffsetAfterZoom() {
@@ -179,19 +183,15 @@ class AudioPlayerViewModel: ObservableObject {
         let maxScrollOffset = max(0, actualWaveformWidth - waveformWidth)
         waveformScrollOffset = max(0, min(maxScrollOffset, waveformScrollOffset))
         
-        if waveformScale <= 1.0 {
+        if waveformScale <= minZoomScale + 0.0001 {
             waveformScrollOffset = 0.0
         }
     }
     
-    func updateWaveformWidth(_ width: CGFloat) {
-        waveformWidth = width
-    }
-    
-    // MARK: - 播放条跟随（参考 Miniwave）
+    // MARK: - Playback Follow
     
     func updatePlaybackFollow() {
-        guard followPlayback && waveformScale > 1.0 && duration > 0 && !isScrollbarDragging && !isAnimatingSeek else {
+        guard followPlayback && waveformScale > minZoomScale && duration > 0 && !isScrollbarDragging && !isAnimatingSeek else {
             return
         }
         
@@ -201,90 +201,41 @@ class AudioPlayerViewModel: ObservableObject {
         let playbackPositionInWindow = playbackPositionInWaveform - waveformScrollOffset
         let windowCenter = waveformWidth / 2
         
-        if playbackPositionInWindow < 0 {
-            if !isWaitingForFollow && !isPlaybackCentered {
-                startPlaybackFollowDelay()
-            }
-        } else if playbackPositionInWindow < windowCenter {
-            if playbackPositionInWindow >= windowCenter - 1 {
-                let targetScrollOffset = playbackPositionInWaveform - windowCenter
-                setWaveformScrollOffset(targetScrollOffset)
-                isPlaybackCentered = true
-                cancelPlaybackFollowDelay()
-            }
-        } else if playbackPositionInWindow > windowCenter {
-            if !isWaitingForFollow && !isPlaybackCentered {
-                startPlaybackFollowDelay()
-            }
-        }
-        
-        if isPlaybackCentered {
+        if playbackPositionInWindow < 0 || playbackPositionInWindow > waveformWidth {
             let targetScrollOffset = playbackPositionInWaveform - windowCenter
             setWaveformScrollOffset(targetScrollOffset)
-        }
-        
-        lastPlaybackPosition = playbackPositionInWindow
-    }
-    
-    private func startPlaybackFollowDelay() {
-        isWaitingForFollow = true
-        playbackFollowTimer?.invalidate()
-        
-        playbackFollowTimer = Timer.scheduledTimer(withTimeInterval: 3.0, repeats: false) { _ in
-            DispatchQueue.main.async {
-                self.executePlaybackFollow()
-            }
-        }
-    }
-    
-    private func cancelPlaybackFollowDelay() {
-        isWaitingForFollow = false
-        playbackFollowTimer?.invalidate()
-        playbackFollowTimer = nil
-    }
-    
-    private func executePlaybackFollow() {
-        guard isWaitingForFollow else { return }
-        
-        let progress = CGFloat(currentTime / duration)
-        let totalScaledWidth = waveformWidth * waveformScale
-        let playbackPositionInWaveform = progress * totalScaledWidth
-        let windowCenter = waveformWidth / 2
-        let targetScrollOffset = playbackPositionInWaveform - windowCenter
-        
-        withAnimation(.easeInOut(duration: 0.3)) {
+            isPlaybackCentered = true
+        } else if abs(playbackPositionInWindow - windowCenter) <= 1 {
+            let targetScrollOffset = playbackPositionInWaveform - windowCenter
             setWaveformScrollOffset(targetScrollOffset)
+            isPlaybackCentered = true
+        } else {
+            isPlaybackCentered = false
         }
-        
-        isPlaybackCentered = true
-        isWaitingForFollow = false
-        playbackFollowTimer = nil
     }
     
     func resetPlaybackFollow() {
         isPlaybackCentered = false
-        lastPlaybackPosition = 0
-        cancelPlaybackFollowDelay()
-    }
-    
-    // MARK: - Toast 提示
-    
-    private func showToast(message: String) {
-        toastTimer?.invalidate()
-        toastMessage = message
-        showToast = true
-        
-        toastTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: false) { _ in
-            DispatchQueue.main.async {
-                self.showToast = false
-            }
-        }
-    }
-    
-    deinit {
-        toastTimer?.invalidate()
         playbackFollowTimer?.invalidate()
-        seekAnimationTimer?.invalidate()
+        playbackFollowTimer = nil
+    }
+    
+    // 公共：计算实际波形宽度（供视图使用）
+    func calculateActualWaveformWidth() -> CGFloat {
+        guard duration > 0 else { return waveformWidth }
+        let minWidth = CGFloat(duration) * minPxPerSec
+        let baseWidth = max(waveformWidth, minWidth)
+        return baseWidth * waveformScale
+    }
+    
+    // 公共：是否需要滚动条
+    var isWaveformScrollable: Bool {
+        calculateActualWaveformWidth() > waveformWidth + 0.5
+    }
+    
+    // 删除选中的自动化控制点
+    func deleteSelectedAutomationPoint() {
+        volumeAutomation.deleteSelectedPoint()
     }
 }
 
