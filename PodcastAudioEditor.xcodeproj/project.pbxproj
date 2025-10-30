@@ -6,6 +6,15 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		462AF4792EB32B8500C25E28 /* AVFoundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 462AF4782EB32B8500C25E28 /* AVFoundation.framework */; };
+		462AF47B2EB32B9200C25E28 /* AudioToolbox.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 462AF47A2EB32B9200C25E28 /* AudioToolbox.framework */; };
+		462AF47D2EB32B9900C25E28 /* CoreAudioKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 462AF47C2EB32B9800C25E28 /* CoreAudioKit.framework */; };
+		462AF47F2EB32BA100C25E28 /* Accelerate.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 462AF47E2EB32BA100C25E28 /* Accelerate.framework */; };
+		462AF4812EB32BA900C25E28 /* CoreMedia.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 462AF4802EB32BA900C25E28 /* CoreMedia.framework */; };
+		462AF4832EB32BB000C25E28 /* CoreAudio.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 462AF4822EB32BB000C25E28 /* CoreAudio.framework */; };
+/* End PBXBuildFile section */
+
 /* Begin PBXContainerItemProxy section */
 		462AF45B2EB32A7900C25E28 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
@@ -27,11 +36,30 @@
 		462AF44C2EB32A7700C25E28 /* PodcastAudioEditor.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = PodcastAudioEditor.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		462AF45A2EB32A7900C25E28 /* PodcastAudioEditorTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = PodcastAudioEditorTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		462AF4642EB32A7900C25E28 /* PodcastAudioEditorUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = PodcastAudioEditorUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		462AF4782EB32B8500C25E28 /* AVFoundation.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = AVFoundation.framework; path = Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS18.5.sdk/System/Library/Frameworks/AVFoundation.framework; sourceTree = DEVELOPER_DIR; };
+		462AF47A2EB32B9200C25E28 /* AudioToolbox.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = AudioToolbox.framework; path = Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS18.5.sdk/System/Library/Frameworks/AudioToolbox.framework; sourceTree = DEVELOPER_DIR; };
+		462AF47C2EB32B9800C25E28 /* CoreAudioKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = CoreAudioKit.framework; path = Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS18.5.sdk/System/Library/Frameworks/CoreAudioKit.framework; sourceTree = DEVELOPER_DIR; };
+		462AF47E2EB32BA100C25E28 /* Accelerate.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Accelerate.framework; path = Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS18.5.sdk/System/Library/Frameworks/Accelerate.framework; sourceTree = DEVELOPER_DIR; };
+		462AF4802EB32BA900C25E28 /* CoreMedia.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = CoreMedia.framework; path = Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS18.5.sdk/System/Library/Frameworks/CoreMedia.framework; sourceTree = DEVELOPER_DIR; };
+		462AF4822EB32BB000C25E28 /* CoreAudio.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = CoreAudio.framework; path = Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS18.5.sdk/System/Library/Frameworks/CoreAudio.framework; sourceTree = DEVELOPER_DIR; };
 /* End PBXFileReference section */
+
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		462AF4852EB32C1B00C25E28 /* Exceptions for "PodcastAudioEditor" folder in "PodcastAudioEditor" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = 462AF44B2EB32A7700C25E28 /* PodcastAudioEditor */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		462AF44E2EB32A7700C25E28 /* PodcastAudioEditor */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				462AF4852EB32C1B00C25E28 /* Exceptions for "PodcastAudioEditor" folder in "PodcastAudioEditor" target */,
+			);
 			path = PodcastAudioEditor;
 			sourceTree = "<group>";
 		};
@@ -52,6 +80,12 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				462AF4832EB32BB000C25E28 /* CoreAudio.framework in Frameworks */,
+				462AF4792EB32B8500C25E28 /* AVFoundation.framework in Frameworks */,
+				462AF47F2EB32BA100C25E28 /* Accelerate.framework in Frameworks */,
+				462AF47D2EB32B9900C25E28 /* CoreAudioKit.framework in Frameworks */,
+				462AF47B2EB32B9200C25E28 /* AudioToolbox.framework in Frameworks */,
+				462AF4812EB32BA900C25E28 /* CoreMedia.framework in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -78,6 +112,7 @@
 				462AF44E2EB32A7700C25E28 /* PodcastAudioEditor */,
 				462AF45D2EB32A7900C25E28 /* PodcastAudioEditorTests */,
 				462AF4672EB32A7900C25E28 /* PodcastAudioEditorUITests */,
+				462AF4772EB32B8500C25E28 /* Frameworks */,
 				462AF44D2EB32A7700C25E28 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -90,6 +125,19 @@
 				462AF4642EB32A7900C25E28 /* PodcastAudioEditorUITests.xctest */,
 			);
 			name = Products;
+			sourceTree = "<group>";
+		};
+		462AF4772EB32B8500C25E28 /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+				462AF4822EB32BB000C25E28 /* CoreAudio.framework */,
+				462AF4802EB32BA900C25E28 /* CoreMedia.framework */,
+				462AF47E2EB32BA100C25E28 /* Accelerate.framework */,
+				462AF47C2EB32B9800C25E28 /* CoreAudioKit.framework */,
+				462AF47A2EB32B9200C25E28 /* AudioToolbox.framework */,
+				462AF4782EB32B8500C25E28 /* AVFoundation.framework */,
+			);
+			name = Frameworks;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -393,6 +441,9 @@
 				CURRENT_PROJECT_VERSION = 1;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = PodcastAudioEditor/Info.plist;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.productivity";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "用于录音和效果预览";
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphoneos*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphonesimulator*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphoneos*]" = YES;
@@ -406,16 +457,17 @@
 				IPHONEOS_DEPLOYMENT_TARGET = 18.5;
 				LD_RUNPATH_SEARCH_PATHS = "@executable_path/Frameworks";
 				"LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]" = "@executable_path/../Frameworks";
-				MACOSX_DEPLOYMENT_TARGET = 15.3;
+				MACOSX_DEPLOYMENT_TARGET = 13.5;
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.lx.PodcastAudioEditor;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				REGISTER_APP_GROUPS = YES;
 				SDKROOT = auto;
-				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator macosx xros xrsimulator";
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator macosx";
+				SUPPORTS_MACCATALYST = NO;
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = "1,2,7";
+				TARGETED_DEVICE_FAMILY = 2;
 				XROS_DEPLOYMENT_TARGET = 2.5;
 			};
 			name = Debug;
@@ -430,6 +482,9 @@
 				CURRENT_PROJECT_VERSION = 1;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = PodcastAudioEditor/Info.plist;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.productivity";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "用于录音和效果预览";
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphoneos*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphonesimulator*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphoneos*]" = YES;
@@ -443,16 +498,17 @@
 				IPHONEOS_DEPLOYMENT_TARGET = 18.5;
 				LD_RUNPATH_SEARCH_PATHS = "@executable_path/Frameworks";
 				"LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]" = "@executable_path/../Frameworks";
-				MACOSX_DEPLOYMENT_TARGET = 15.3;
+				MACOSX_DEPLOYMENT_TARGET = 13.5;
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.lx.PodcastAudioEditor;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				REGISTER_APP_GROUPS = YES;
 				SDKROOT = auto;
-				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator macosx xros xrsimulator";
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator macosx";
+				SUPPORTS_MACCATALYST = NO;
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = "1,2,7";
+				TARGETED_DEVICE_FAMILY = 2;
 				XROS_DEPLOYMENT_TARGET = 2.5;
 			};
 			name = Release;
