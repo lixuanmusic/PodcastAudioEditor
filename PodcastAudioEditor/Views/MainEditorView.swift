@@ -53,7 +53,7 @@ struct MainEditorView: View {
 
                 Divider()
 
-                TimelineRuler(currentTime: viewModel.currentTime, duration: viewModel.duration, scale: viewModel.waveformScale, scrollOffset: viewModel.waveformScrollOffset)
+                TimelineRuler(currentTime: viewModel.currentTime, duration: viewModel.duration, scale: viewModel.waveformScale, scrollOffset: viewModel.waveformScrollOffset, waveformWidth: viewModel.waveformWidth)
                     .frame(height: 28)
 
             ZStack(alignment: .topTrailing) {

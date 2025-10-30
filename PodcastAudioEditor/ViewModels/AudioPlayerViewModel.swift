@@ -160,7 +160,12 @@ class AudioPlayerViewModel: ObservableObject {
         let baseWidth = max(waveformWidth, minWidth)
         
         // 应用缩放因子
-        return baseWidth * waveformScale
+        let result = baseWidth * waveformScale
+        
+        // Debug 输出
+        print("📊 波形宽度计算: duration=\(duration)s, windowWidth=\(waveformWidth), minWidth=\(minWidth), baseWidth=\(baseWidth), scale=\(waveformScale), result=\(result)")
+        
+        return result
     }
     
     func setWaveformScrollOffset(_ offset: CGFloat) {

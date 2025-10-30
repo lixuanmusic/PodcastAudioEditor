@@ -5,11 +5,17 @@ struct TimelineRuler: View {
     let duration: Double
     let scale: CGFloat
     let scrollOffset: CGFloat
+    let waveformWidth: CGFloat  // 新增：窗口宽度参数
 
     var body: some View {
         GeometryReader { geo in
             let width = geo.size.width
-            let totalScaledWidth = width * scale
+            
+            // 使用与波形相同的宽度计算逻辑
+            let minPxPerSec: CGFloat = 50.0
+            let minWidth = CGFloat(duration) * minPxPerSec
+            let baseWidth = max(waveformWidth, minWidth)
+            let totalScaledWidth = baseWidth * scale
             let marks = tickMarks(for: duration, pixelWidth: totalScaledWidth)
 
             ZStack(alignment: .topLeading) {

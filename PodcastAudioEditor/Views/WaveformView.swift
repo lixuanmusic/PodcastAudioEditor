@@ -14,8 +14,11 @@ struct WaveformView: View {
         let minPxPerSec: CGFloat = 50.0
         let minWidth = CGFloat(viewModel.duration) * minPxPerSec
         let baseWidth = max(geometry.size.width, minWidth)
+        let result = baseWidth * viewModel.waveformScale
         
-        return baseWidth * viewModel.waveformScale
+        print("🎨 WaveformView宽度: duration=\(viewModel.duration)s, geometryWidth=\(geometry.size.width), minWidth=\(minWidth), baseWidth=\(baseWidth), scale=\(viewModel.waveformScale), result=\(result)")
+        
+        return result
     }
     
     var body: some View {
