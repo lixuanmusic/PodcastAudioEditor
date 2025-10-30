@@ -90,6 +90,7 @@ struct MainEditorView: View {
                 AudioProcessingPanel(
                     processor: audioProcessor,
                     analysisVM: analysisVM,
+                    audioEngine: viewModel.audioEngine,
                     currentFileURL: $currentFileURL
                 )
                 .frame(height: 180)

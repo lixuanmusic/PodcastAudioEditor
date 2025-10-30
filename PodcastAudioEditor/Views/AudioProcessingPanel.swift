@@ -46,6 +46,7 @@ struct GainIndicatorView: View {
 struct AudioProcessingPanel: View {
     @ObservedObject var processor: AudioProcessor
     @ObservedObject var analysisVM: AudioAnalysisViewModel
+    @ObservedObject var audioEngine: AudioEngine
     @Binding var currentFileURL: URL?
     
     @State private var showExportDialog = false
@@ -56,7 +57,12 @@ struct AudioProcessingPanel: View {
     // 监听分析完成
     private func checkAnalysisCompleted() {
         if !analysisVM.isAnalyzing && !analysisVM.features.isEmpty && processor.config.volumeBalanceEnabled {
-            let _ = processor.calculateVolumeGains(features: analysisVM.features)
+            let gains = processor.calculateVolumeGains(features: analysisVM.features)
+            
+            // 启用实时处理
+            if !gains.isEmpty {
+                audioEngine.enableRealtimeProcessing(gains: gains)
+            }
         }
     }
     
@@ -76,9 +82,22 @@ struct AudioProcessingPanel: View {
                     Toggle("音量动态平衡", isOn: $processor.config.volumeBalanceEnabled)
                         .toggleStyle(.switch)
                         .onChange(of: processor.config.volumeBalanceEnabled) { enabled in
-                            if enabled && !analysisVM.features.isEmpty {
-                                // 自动计算增益
-                                let _ = processor.calculateVolumeGains(features: analysisVM.features)
+                            if enabled {
+                                if !analysisVM.features.isEmpty {
+                                    // 自动计算增益
+                                    let gains = processor.calculateVolumeGains(features: analysisVM.features)
+                                    
+                                    // 启用实时处理
+                                    if !gains.isEmpty {
+                                        audioEngine.enableRealtimeProcessing(gains: gains)
+                                    }
+                                } else {
+                                    // 如果特征未提取，提示需要先分析
+                                    processor.config.volumeBalanceEnabled = false
+                                }
+                            } else {
+                                // 禁用实时处理
+                                audioEngine.disableRealtimeProcessing()
                             }
                         }
                     
