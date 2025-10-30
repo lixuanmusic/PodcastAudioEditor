@@ -14,7 +14,7 @@ struct WaveformView: View {
                 RoundedRectangle(cornerRadius: 4)
                     .fill(Color.gray.opacity(0.12))
                 
-                // 波形内容，支持水平偏移和缩放（竖条样式，参照 podcast_audio_tool）
+                // 波形内容，支持水平偏移和缩放（竖条样式，完全参照 WaveSurfer.js）
                 ZStack(alignment: .leading) {
                     // 背景
                     Rectangle().fill(Color.gray.opacity(0.08))
@@ -24,30 +24,42 @@ struct WaveformView: View {
                         let waveformData = viewModel.audioEngine.waveformData
                         guard !waveformData.isEmpty else { return }
                         
+                        let duration = viewModel.duration
+                        guard duration > 0 else { return }
+                        
                         let height = canvasSize.height
-                        let barWidth: CGFloat = 3.0      // 竖条宽度 3px
+                        let barWidth: CGFloat = 3.0      // 竖条宽度 3px（固定）
+                        let barGap: CGFloat = 2.0        // 竖条间隔 2px（固定）
                         let barRadius: CGFloat = 3.0     // 竖条圆角 3px
+                        let barPitch = barWidth + barGap // 竖条周期 5px（固定）
                         
                         // 使用第一声道数据
                         let displayWaveformData = waveformData.isEmpty ? [] : waveformData[0]
                         guard !displayWaveformData.isEmpty else { return }
                         
-                        let dataPointCount = CGFloat(displayWaveformData.count)
+                        // WaveSurfer 逻辑：
+                        // 1. 基础波形宽度 = 音频时长 × minPxPerSec（默认50）
+                        // 2. 实际波形宽度 = 基础宽度 × 缩放因子
+                        // 3. 竖条数量 = 实际波形宽度 / barPitch
                         
-                        // Canvas的canvasSize.width已经是缩放后的宽度（由外层ZStack.frame设置）
-                        // 不需要再乘以scale
-                        let totalWidth = canvasSize.width
+                        let minPxPerSec: CGFloat = 50.0  // 参照 WaveSurfer 默认值
+                        let baseWaveformWidth = CGFloat(duration) * minPxPerSec
+                        let scale = viewModel.waveformScale
+                        let actualWaveformWidth = baseWaveformWidth * scale
                         
-                        // 动态计算竖条间隔：使波形数据点均匀分布在总宽度上
-                        // 每个数据点占据的宽度 = 总宽度 / 数据点数量
-                        let pixelPerDataPoint = totalWidth / dataPointCount
+                        // 计算应该显示多少个竖条
+                        let visibleBarsCount = Int(ceil(actualWaveformWidth / barPitch))
                         
-                        // 竖条间隔 = 每个数据点的宽度 - 竖条宽度（保留最小间隔）
-                        let barGap = max(1.0, pixelPerDataPoint - barWidth)
-                        let barPitch = barWidth + barGap // 竖条周期
+                        // 从波形数据中采样
+                        let dataPointCount = displayWaveformData.count
                         
-                        for (index, amplitude) in displayWaveformData.enumerated() {
-                            let x = CGFloat(index) * barPitch
+                        for barIndex in 0..<visibleBarsCount {
+                            let x = CGFloat(barIndex) * barPitch
+                            
+                            // 映射到波形数据索引
+                            let dataIndex = Int(Float(barIndex) / Float(visibleBarsCount) * Float(dataPointCount))
+                            let safeDataIndex = min(dataIndex, dataPointCount - 1)
+                            let amplitude = displayWaveformData[safeDataIndex]
                             
                             // 计算竖条高度（归一化到 0-1）
                             let normalizedAmplitude = min(max(CGFloat(amplitude), 0), 1.0)
@@ -74,7 +86,7 @@ struct WaveformView: View {
                     .clipped()
                     .id(waveformDataVersion)
                 }
-                .frame(width: geometry.size.width * viewModel.waveformScale, alignment: .leading)
+                .frame(width: max(geometry.size.width, CGFloat(viewModel.duration) * 50.0 * viewModel.waveformScale), alignment: .leading)
                 .offset(x: -viewModel.waveformScrollOffset)
                 .clipped()
                 
@@ -118,14 +130,26 @@ struct WaveformView: View {
     }
     
     private func maskWidth(for geometry: GeometryProxy) -> CGFloat {
-        let progress = viewModel.duration > 0 ? CGFloat(viewModel.currentTime / viewModel.duration) : 0
-        let scaledWidth = geometry.size.width * viewModel.waveformScale * progress
-        return scaledWidth - viewModel.waveformScrollOffset
+        guard viewModel.duration > 0 else { return 0 }
+        
+        // WaveSurfer 逻辑：基于音频时长和像素密度计算实际宽度
+        let minPxPerSec: CGFloat = 50.0
+        let baseWaveformWidth = CGFloat(viewModel.duration) * minPxPerSec
+        let actualWaveformWidth = baseWaveformWidth * viewModel.waveformScale
+        
+        let progress = CGFloat(viewModel.currentTime / viewModel.duration)
+        let playedWidth = actualWaveformWidth * progress
+        
+        return playedWidth - viewModel.waveformScrollOffset
     }
     
     private func playbackIndicator(geometry: GeometryProxy) -> some View {
+        let minPxPerSec: CGFloat = 50.0
+        let baseWaveformWidth = CGFloat(viewModel.duration) * minPxPerSec
+        let actualWaveformWidth = baseWaveformWidth * viewModel.waveformScale
+        
         let progress = viewModel.duration > 0 ? CGFloat(viewModel.currentTime / viewModel.duration) : 0
-        let indicatorX = geometry.size.width * viewModel.waveformScale * progress - viewModel.waveformScrollOffset
+        let indicatorX = actualWaveformWidth * progress - viewModel.waveformScrollOffset
         
         return Rectangle()
             .fill(Color.accentColor)
@@ -134,8 +158,14 @@ struct WaveformView: View {
     }
     
     private func seekAudio(at xPosition: CGFloat, in geometry: GeometryProxy) {
-        let totalScaledWidth = geometry.size.width * viewModel.waveformScale
-        let normalizedPosition = xPosition / totalScaledWidth
+        guard viewModel.duration > 0 else { return }
+        
+        // WaveSurfer 逻辑：基于实际波形宽度计算位置
+        let minPxPerSec: CGFloat = 50.0
+        let baseWaveformWidth = CGFloat(viewModel.duration) * minPxPerSec
+        let actualWaveformWidth = baseWaveformWidth * viewModel.waveformScale
+        
+        let normalizedPosition = xPosition / actualWaveformWidth
         let seekTime = Double(normalizedPosition) * viewModel.duration
         viewModel.audioEngine.seek(to: seekTime)
     }

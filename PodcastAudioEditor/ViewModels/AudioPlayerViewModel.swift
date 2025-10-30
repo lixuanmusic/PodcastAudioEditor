@@ -106,15 +106,15 @@ class AudioPlayerViewModel: ObservableObject {
         isZooming = true
         
         // 计算鼠标位置对应的波形位置百分比
-        let totalOldWidth = waveformWidth * waveformScale
-        let mousePositionInWaveformRatio = (mouseX + waveformScrollOffset) / totalOldWidth
+        let oldActualWidth = calculateActualWaveformWidth()
+        let mousePositionInWaveformRatio = (mouseX + waveformScrollOffset) / oldActualWidth
         
         withAnimation(.none) {
             waveformScale = newScale
             
             // 重新计算 scrollOffset 以保持鼠标位置不变
-            let totalNewWidth = waveformWidth * newScale
-            let newMousePositionInWaveform = mousePositionInWaveformRatio * totalNewWidth
+            let newActualWidth = calculateActualWaveformWidth()
+            let newMousePositionInWaveform = mousePositionInWaveformRatio * newActualWidth
             let newScrollOffset = newMousePositionInWaveform - mouseX
             setWaveformScrollOffset(newScrollOffset)
         }
@@ -148,15 +148,23 @@ class AudioPlayerViewModel: ObservableObject {
         }
     }
     
+    // WaveSurfer 逻辑：基于音频时长计算实际波形宽度
+    private func calculateActualWaveformWidth() -> CGFloat {
+        guard duration > 0 else { return waveformWidth }
+        let minPxPerSec: CGFloat = 50.0  // 与 WaveSurfer 保持一致
+        let baseWaveformWidth = CGFloat(duration) * minPxPerSec
+        return baseWaveformWidth * waveformScale
+    }
+    
     func setWaveformScrollOffset(_ offset: CGFloat) {
-        let totalScaledWidth = waveformWidth * waveformScale
-        let maxScrollOffset = max(0, totalScaledWidth - waveformWidth)
+        let actualWaveformWidth = calculateActualWaveformWidth()
+        let maxScrollOffset = max(0, actualWaveformWidth - waveformWidth)
         waveformScrollOffset = max(0, min(maxScrollOffset, offset))
     }
     
     private func adjustScrollOffsetAfterZoom() {
-        let totalScaledWidth = waveformWidth * waveformScale
-        let maxScrollOffset = max(0, totalScaledWidth - waveformWidth)
+        let actualWaveformWidth = calculateActualWaveformWidth()
+        let maxScrollOffset = max(0, actualWaveformWidth - waveformWidth)
         waveformScrollOffset = max(0, min(maxScrollOffset, waveformScrollOffset))
         
         if waveformScale <= 1.0 {
@@ -176,8 +184,8 @@ class AudioPlayerViewModel: ObservableObject {
         }
         
         let progress = CGFloat(currentTime / duration)
-        let totalScaledWidth = waveformWidth * waveformScale
-        let playbackPositionInWaveform = progress * totalScaledWidth
+        let actualWaveformWidth = calculateActualWaveformWidth()
+        let playbackPositionInWaveform = progress * actualWaveformWidth
         let playbackPositionInWindow = playbackPositionInWaveform - waveformScrollOffset
         let windowCenter = waveformWidth / 2
         
