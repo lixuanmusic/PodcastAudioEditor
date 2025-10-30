@@ -78,6 +78,18 @@ final class AudioEngine: ObservableObject {
             
             // 异步生成波形数据
             extractWaveformData(from: url)
+            
+            // 异步分析音频特征
+            DispatchQueue.global(qos: .userInitiated).async {
+                AudioAnalyzer.shared.analyzeAudio(filePath: url.path) { result, error in
+                    if let result = result, result.success {
+                        print("✓ 音频分析完成")
+                        NotificationCenter.default.post(name: .didAnalyzeAudio, object: nil, userInfo: ["result": result])
+                    } else if let error = error {
+                        print("❌ 音频分析失败: \(error.localizedDescription)")
+                    }
+                }
+            }
         } catch {
             print("❌ 音频加载失败: \(error.localizedDescription)")
         }
@@ -285,5 +297,9 @@ final class AudioEngine: ObservableObject {
             }
         }
     }
+}
+
+extension Notification.Name {
+    static let didAnalyzeAudio = Notification.Name("didAnalyzeAudio")
 }
 

@@ -4,7 +4,6 @@ import Combine
 
 class AudioPlayerViewModel: ObservableObject {
     @Published var audioEngine = AudioEngine.shared // Use the shared instance
-    @Published var volumeAutomation = VolumeAutomation()  // 新增音量自动化
     
     @Published var isPlaying: Bool = false
     @Published var currentTime: TimeInterval = 0
@@ -72,7 +71,6 @@ class AudioPlayerViewModel: ObservableObject {
                 if has {
                     // 新文件已生成波形数据，重置适配标记并适配全长
                     self.didFitAfterLoad = false
-                    self.volumeAutomation.clear()  // 清除旧自动化数据
                     self.maybeFitToFullLength()
                 }
             }
@@ -231,11 +229,6 @@ class AudioPlayerViewModel: ObservableObject {
     // 公共：是否需要滚动条
     var isWaveformScrollable: Bool {
         calculateActualWaveformWidth() > waveformWidth + 0.5
-    }
-    
-    // 删除选中的自动化控制点
-    func deleteSelectedAutomationPoint() {
-        volumeAutomation.deleteSelectedPoint()
     }
 }
 

@@ -4,6 +4,8 @@ import AppKit
 struct MainEditorView: View {
     @StateObject var viewModel = AudioPlayerViewModel()
     @State private var isWaveformHovered: Bool = false
+    @State private var analysisResult: AudioAnalysisResult?
+    @State private var showAnalysisWindow: Bool = false
     
     var body: some View {
         ZStack(alignment: .bottom) {
@@ -61,12 +63,6 @@ struct MainEditorView: View {
                     .frame(maxHeight: .infinity)
                     .background(Color(NSColor.controlBackgroundColor))
                 
-                // 音量自动化线叠加在波形上
-                GeometryReader { geo in
-                    AutomationView(viewModel: viewModel, geometry: geo)
-                        .frame(maxHeight: .infinity)
-                }
-                
                 // Toast 提示 - 使用 overlay 不占用空间
                 if viewModel.showToast {
                     ToastView(message: viewModel.toastMessage)
@@ -97,6 +93,13 @@ struct MainEditorView: View {
                 viewModel.resetPlaybackFollow()
             }
         }
+        .onReceive(NotificationCenter.default.publisher(for: .didAnalyzeAudio)) { notification in
+            if let result = notification.userInfo?["result"] as? AudioAnalysisResult {
+                self.analysisResult = result
+                self.showAnalysisWindow = true
+                self.openAnalysisWindow(result: result)
+            }
+        }
         .background(EventHandlingView(viewModel: viewModel, isWaveformHovered: isWaveformHovered))
     }
 
@@ -111,6 +114,20 @@ struct MainEditorView: View {
         } else {
             return String(format: "%02d:%02d", m, s)
         }
+    }
+     
+    private func openAnalysisWindow(result: AudioAnalysisResult) {
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 800, height: 600),
+            styleMask: [.titled, .closable, .resizable],
+            backing: .buffered,
+            defer: false
+        )
+        window.title = "音频分析结果"
+        window.contentView = NSHostingView(rootView: AudioAnalysisWindow(result: result))
+        window.center()
+        window.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
     }
 }
 
