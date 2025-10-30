@@ -14,22 +14,57 @@ struct WaveformView: View {
                 RoundedRectangle(cornerRadius: 4)
                     .fill(Color.gray.opacity(0.12))
                 
-                // 波形内容，支持水平偏移和缩放
+                // 波形内容，支持水平偏移和缩放（竖条样式，参照 podcast_audio_tool）
                 ZStack(alignment: .leading) {
-                    ForEach(0..<viewModel.audioEngine.waveformData.count, id: \.self) { channel in
-                        WaveformChannelView(
-                            waveformData: viewModel.audioEngine.waveformData[channel],
-                            channelIndex: channel,
-                            totalChannels: viewModel.audioEngine.waveformData.count,
-                            geometry: geometry,
-                            scale: viewModel.waveformScale
-                        )
+                    // 背景
+                    Rectangle().fill(Color.gray.opacity(0.08))
+                    
+                    // 竖条波形
+                    Canvas { context, canvasSize in
+                        let waveformData = viewModel.audioEngine.waveformData
+                        guard !waveformData.isEmpty else { return }
+                        
+                        let height = canvasSize.height
+                        let barWidth: CGFloat = 3.0      // 竖条宽度 3px
+                        let barGap: CGFloat = 2.0        // 竖条间隔 2px
+                        let barRadius: CGFloat = 3.0     // 竖条圆角 3px
+                        let barPitch = barWidth + barGap // 竖条周期（宽度 + 间隔）
+                        let scale = viewModel.waveformScale
+                        
+                        // 使用第一声道数据（如果是多声道则合并显示）
+                        let displayWaveformData = waveformData.isEmpty ? [] : waveformData[0]
+                        
+                        for (index, amplitude) in displayWaveformData.enumerated() {
+                            let x = CGFloat(index) * barPitch * scale
+                            
+                            // 计算竖条高度（归一化到 0-1）
+                            let normalizedAmplitude = min(max(CGFloat(amplitude), 0), 1.0)
+                            let barHeight = height * normalizedAmplitude
+                            let barY = (height - barHeight) / 2  // 竖条从中心向上下延伸
+                            
+                            // 绘制竖条（带圆角）
+                            let barRect = CGRect(
+                                x: x,
+                                y: barY,
+                                width: barWidth * scale,
+                                height: barHeight
+                            )
+                            
+                            var path = Path()
+                            path.addRoundedRect(
+                                in: barRect,
+                                cornerSize: CGSize(width: barRadius * scale, height: barRadius * scale)
+                            )
+                            
+                            context.fill(path, with: .color(Color.primary.opacity(0.6)))
+                        }
                     }
+                    .clipped()
+                    .id(waveformDataVersion)
                 }
                 .frame(width: geometry.size.width * viewModel.waveformScale, alignment: .leading)
                 .offset(x: -viewModel.waveformScrollOffset)
                 .clipped()
-                .id(waveformDataVersion) // 只在波形数据更新时重绘，播放条移动时不重绘
                 
                 // 已播放遮罩
                 Rectangle()
@@ -91,57 +126,6 @@ struct WaveformView: View {
         let normalizedPosition = xPosition / totalScaledWidth
         let seekTime = Double(normalizedPosition) * viewModel.duration
         viewModel.audioEngine.seek(to: seekTime)
-    }
-}
-
-// 单声道波形渲染（参考 Miniwave）
-struct WaveformChannelView: View, Equatable {
-    let waveformData: [Float]
-    let channelIndex: Int
-    let totalChannels: Int
-    let geometry: GeometryProxy
-    let scale: CGFloat
-    
-    // 实现 Equatable，防止不必要的重绘
-    static func == (lhs: WaveformChannelView, rhs: WaveformChannelView) -> Bool {
-        lhs.waveformData == rhs.waveformData &&
-        lhs.channelIndex == rhs.channelIndex &&
-        lhs.totalChannels == rhs.totalChannels &&
-        lhs.scale == rhs.scale
-    }
-
-    var body: some View {
-        waveformPath
-            .fill(Color.primary.opacity(0.7))
-    }
-
-    private var waveformPath: Path {
-        Path { path in
-            guard !waveformData.isEmpty else { return }
-
-            let channelHeight = geometry.size.height / CGFloat(totalChannels)
-            let yOffset = channelHeight * CGFloat(channelIndex)
-            let midY = yOffset + channelHeight / 2
-            let totalScaledWidth = geometry.size.width * scale
-
-            path.move(to: CGPoint(x: 0, y: midY))
-
-            // 绘制上半部分
-            for (index, sample) in waveformData.enumerated() {
-                let x = CGFloat(index) / CGFloat(waveformData.count) * totalScaledWidth
-                let y = midY - CGFloat(sample) * channelHeight / 2
-                path.addLine(to: CGPoint(x: x, y: y))
-            }
-
-            // 绘制下半部分
-            for (index, sample) in waveformData.enumerated().reversed() {
-                let x = CGFloat(index) / CGFloat(waveformData.count) * totalScaledWidth
-                let y = midY + CGFloat(sample) * channelHeight / 2
-                path.addLine(to: CGPoint(x: x, y: y))
-            }
-
-            path.closeSubpath()
-        }
     }
 }
 
