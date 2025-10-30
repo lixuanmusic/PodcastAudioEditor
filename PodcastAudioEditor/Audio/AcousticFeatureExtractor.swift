@@ -16,10 +16,11 @@ struct FeatureExtractionConfig {
         extractMFCC: false
     )
     
-    // 快速模式：能量+MFCC（支持分类和发言人识别）
+    // 快速模式：能量+ZCR+MFCC（支持分类和发言人识别）
+    // 注意：ZCR计算很快（O(n)），不需要FFT，所以包含进来以支持准确分类
     static let fast = FeatureExtractionConfig(
         extractEnergy: true,
-        extractZCR: false,
+        extractZCR: true,         // 开启ZCR以支持音乐/语音分类
         extractSpectralCentroid: false,
         extractMFCC: true
     )

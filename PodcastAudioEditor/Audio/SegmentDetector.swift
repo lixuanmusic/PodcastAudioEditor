@@ -205,16 +205,48 @@ final class SegmentDetector {
     
     // 识别单帧的类型
     private func detectFrameType(feature: AcousticFeatures) -> SegmentType {
-        // 简化的分类逻辑：
-        // - ZCR 低 + 能量稳定 → 音乐
-        // - ZCR 高 + 能量变化 → 语音
+        // 分类逻辑（优先级从高到低）：
+        // 1. 使用ZCR（如果可用）- 最可靠的指标
+        // 2. 使用MFCC辅助判断（如果ZCR不可用或不确定）
+        // 3. 默认语音（播客以语音为主）
         
-        if feature.zcr < 0.08 && feature.spectralCentroid < 3000 {
-            return .music
-        } else if feature.zcr > 0.15 {
+        // 检查ZCR是否可用（在fast模式下应该有）
+        if feature.zcr > 0 {
+            // ZCR高 → 语音（语音有更多高频成分）
+            if feature.zcr > 0.15 {
+                return .speech
+            }
+            // ZCR很低 → 可能是音乐（音乐通常更平滑）
+            if feature.zcr < 0.08 {
+                // 进一步用MFCC确认
+                if feature.spectralCentroid > 0 && feature.spectralCentroid < 3000 {
+                    return .music
+                }
+                // 如果谱质心不可用，使用MFCC能量稳定性判断
+                if feature.spectralCentroid == 0 && !feature.mfccValues.isEmpty {
+                    // MFCC[0]是能量，如果能量较高且稳定（通过MFCC系数变化判断）
+                    let mfccVariance = feature.mfccValues.reduce(0) { $0 + abs($1) } / Float(feature.mfccValues.count)
+                    if mfccVariance < 5.0 {  // 音乐通常MFCC变化较小
+                        return .music
+                    }
+                }
+                // 默认：低ZCR但不确定时，倾向于语音（播客主要是语音）
+                return .speech
+            }
+            // ZCR中等（0.08-0.15）：通常是语音
             return .speech
-        } else {
-            return .speech  // 默认语音
         }
+        
+        // ZCR不可用时，使用MFCC判断
+        if !feature.mfccValues.isEmpty {
+            // MFCC系数变化大 → 语音（语音更复杂）
+            let mfccVariance = feature.mfccValues.reduce(0) { $0 + abs($1) } / Float(feature.mfccValues.count)
+            if mfccVariance < 3.0 {
+                return .music
+            }
+        }
+        
+        // 默认返回语音（播客场景）
+        return .speech
     }
 }
