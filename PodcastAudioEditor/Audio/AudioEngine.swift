@@ -140,7 +140,8 @@ final class AudioEngine: ObservableObject {
     // MARK: - Timer 更新
     private func startTimer() {
         stopTimer()
-        timer = Timer(timeInterval: 0.1, repeats: true) { [weak self] _ in
+        // 提高更新频率到 ~60fps (16.67ms) 以获得平滑的播放条移动，特别是在高倍缩放下
+        timer = Timer(timeInterval: 1.0 / 60.0, repeats: true) { [weak self] _ in
             self?.updateCurrentTime()
         }
         if let timer = timer {

@@ -56,31 +56,32 @@ struct MainEditorView: View {
                 TimelineRuler(currentTime: viewModel.currentTime, duration: viewModel.duration, scale: viewModel.waveformScale, scrollOffset: viewModel.waveformScrollOffset)
                     .frame(height: 28)
 
-                ZStack(alignment: .topTrailing) {
-                    WaveformView(viewModel: viewModel, isHovered: $isWaveformHovered)
-                        .frame(minHeight: 180)
-                        .background(Color(NSColor.controlBackgroundColor))
-                    
-                    // Toast 提示 - 使用 overlay 不占用空间
-                    if viewModel.showToast {
-                        ToastView(message: viewModel.toastMessage)
-                            .padding(.top, 12)
-                            .padding(.trailing, 20)
-                            .transition(.move(edge: .top).combined(with: .opacity))
-                    }
-                }
-                .frame(minHeight: 180)
+            ZStack(alignment: .topTrailing) {
+                WaveformView(viewModel: viewModel, isHovered: $isWaveformHovered)
+                    .frame(maxHeight: .infinity)
+                    .background(Color(NSColor.controlBackgroundColor))
                 
-                Spacer()
+                // Toast 提示 - 使用 overlay 不占用空间
+                if viewModel.showToast {
+                    ToastView(message: viewModel.toastMessage)
+                        .padding(.top, 12)
+                        .padding(.trailing, 20)
+                        .transition(.move(edge: .top).combined(with: .opacity))
+                }
+            }
+            .frame(maxHeight: .infinity)
             }
             
-            // 滚动条 - 贴到窗口下边缘，不占用VStack空间
+            // 滚动条 - 完全贴到窗口下边缘
             if viewModel.waveformScale > 1.0 {
                 HorizontalScrollbar(viewModel: viewModel)
                     .frame(height: 12)
+                    .offset(y: 6) // 下移6px完全贴到窗口底部
+                    .ignoresSafeArea(edges: .bottom)
             }
         }
-        .onReceive(viewModel.$currentTime.throttle(for: .milliseconds(100), scheduler: RunLoop.main, latest: true)) { _ in
+        .ignoresSafeArea(.all, edges: .bottom)
+        .onReceive(viewModel.$currentTime) { _ in
             if viewModel.isPlaying && viewModel.waveformScale > 1.0 {
                 viewModel.updatePlaybackFollow()
             }
@@ -146,6 +147,7 @@ struct HorizontalScrollbar: View {
                     )
             }
         }
+        .ignoresSafeArea(.container, edges: .bottom)
     }
     
     private func thumbWidth(geometry: GeometryProxy) -> CGFloat {

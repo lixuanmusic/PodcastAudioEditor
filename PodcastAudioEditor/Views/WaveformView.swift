@@ -5,6 +5,7 @@ struct WaveformView: View {
     @Binding var isHovered: Bool
     
     @State private var isDragging: Bool = false
+    @State private var waveformDataVersion: Int = 0
     
     var body: some View {
         GeometryReader { geometry in
@@ -28,6 +29,7 @@ struct WaveformView: View {
                 .frame(width: geometry.size.width * viewModel.waveformScale, alignment: .leading)
                 .offset(x: -viewModel.waveformScrollOffset)
                 .clipped()
+                .id(waveformDataVersion) // 只在波形数据更新时重绘，播放条移动时不重绘
                 
                 // 已播放遮罩
                 Rectangle()
@@ -57,6 +59,9 @@ struct WaveformView: View {
             }
             .onChange(of: geometry.size.width) { newWidth in
                 viewModel.updateWaveformWidth(newWidth)
+            }
+            .onChange(of: viewModel.audioEngine.waveformData.count) { _ in
+                waveformDataVersion += 1
             }
         }
         .clipShape(RoundedRectangle(cornerRadius: 4))
@@ -90,12 +95,20 @@ struct WaveformView: View {
 }
 
 // 单声道波形渲染（参考 Miniwave）
-struct WaveformChannelView: View {
+struct WaveformChannelView: View, Equatable {
     let waveformData: [Float]
     let channelIndex: Int
     let totalChannels: Int
     let geometry: GeometryProxy
     let scale: CGFloat
+    
+    // 实现 Equatable，防止不必要的重绘
+    static func == (lhs: WaveformChannelView, rhs: WaveformChannelView) -> Bool {
+        lhs.waveformData == rhs.waveformData &&
+        lhs.channelIndex == rhs.channelIndex &&
+        lhs.totalChannels == rhs.totalChannels &&
+        lhs.scale == rhs.scale
+    }
 
     var body: some View {
         waveformPath
