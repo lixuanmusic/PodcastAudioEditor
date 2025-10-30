@@ -7,6 +7,17 @@ struct WaveformView: View {
     @State private var isDragging: Bool = false
     @State private var waveformDataVersion: Int = 0
     
+    // 统一计算波形宽度的辅助函数（与 ViewModel 保持一致）
+    private func calculateActualWaveformWidth(_ geometry: GeometryProxy) -> CGFloat {
+        guard viewModel.duration > 0 else { return geometry.size.width }
+        
+        let minPxPerSec: CGFloat = 50.0
+        let minWidth = CGFloat(viewModel.duration) * minPxPerSec
+        let baseWidth = max(geometry.size.width, minWidth)
+        
+        return baseWidth * viewModel.waveformScale
+    }
+    
     var body: some View {
         GeometryReader { geometry in
             ZStack(alignment: .leading) {
@@ -37,15 +48,8 @@ struct WaveformView: View {
                         let displayWaveformData = waveformData.isEmpty ? [] : waveformData[0]
                         guard !displayWaveformData.isEmpty else { return }
                         
-                        // WaveSurfer 逻辑：
-                        // 1. 基础波形宽度 = 音频时长 × minPxPerSec（默认50）
-                        // 2. 实际波形宽度 = 基础宽度 × 缩放因子
-                        // 3. 竖条数量 = 实际波形宽度 / barPitch
-                        
-                        let minPxPerSec: CGFloat = 50.0  // 参照 WaveSurfer 默认值
-                        let baseWaveformWidth = CGFloat(duration) * minPxPerSec
-                        let scale = viewModel.waveformScale
-                        let actualWaveformWidth = baseWaveformWidth * scale
+                        // Canvas 的 canvasSize.width 就是实际波形宽度（由外层 frame 设置）
+                        let actualWaveformWidth = canvasSize.width
                         
                         // 计算应该显示多少个竖条
                         let visibleBarsCount = Int(ceil(actualWaveformWidth / barPitch))
@@ -86,7 +90,7 @@ struct WaveformView: View {
                     .clipped()
                     .id(waveformDataVersion)
                 }
-                .frame(width: max(geometry.size.width, CGFloat(viewModel.duration) * 50.0 * viewModel.waveformScale), alignment: .leading)
+                .frame(width: calculateActualWaveformWidth(geometry), alignment: .leading)
                 .offset(x: -viewModel.waveformScrollOffset)
                 .clipped()
                 
@@ -132,11 +136,7 @@ struct WaveformView: View {
     private func maskWidth(for geometry: GeometryProxy) -> CGFloat {
         guard viewModel.duration > 0 else { return 0 }
         
-        // WaveSurfer 逻辑：基于音频时长和像素密度计算实际宽度
-        let minPxPerSec: CGFloat = 50.0
-        let baseWaveformWidth = CGFloat(viewModel.duration) * minPxPerSec
-        let actualWaveformWidth = baseWaveformWidth * viewModel.waveformScale
-        
+        let actualWaveformWidth = calculateActualWaveformWidth(geometry)
         let progress = CGFloat(viewModel.currentTime / viewModel.duration)
         let playedWidth = actualWaveformWidth * progress
         
@@ -144,10 +144,7 @@ struct WaveformView: View {
     }
     
     private func playbackIndicator(geometry: GeometryProxy) -> some View {
-        let minPxPerSec: CGFloat = 50.0
-        let baseWaveformWidth = CGFloat(viewModel.duration) * minPxPerSec
-        let actualWaveformWidth = baseWaveformWidth * viewModel.waveformScale
-        
+        let actualWaveformWidth = calculateActualWaveformWidth(geometry)
         let progress = viewModel.duration > 0 ? CGFloat(viewModel.currentTime / viewModel.duration) : 0
         let indicatorX = actualWaveformWidth * progress - viewModel.waveformScrollOffset
         
@@ -160,11 +157,7 @@ struct WaveformView: View {
     private func seekAudio(at xPosition: CGFloat, in geometry: GeometryProxy) {
         guard viewModel.duration > 0 else { return }
         
-        // WaveSurfer 逻辑：基于实际波形宽度计算位置
-        let minPxPerSec: CGFloat = 50.0
-        let baseWaveformWidth = CGFloat(viewModel.duration) * minPxPerSec
-        let actualWaveformWidth = baseWaveformWidth * viewModel.waveformScale
-        
+        let actualWaveformWidth = calculateActualWaveformWidth(geometry)
         let normalizedPosition = xPosition / actualWaveformWidth
         let seekTime = Double(normalizedPosition) * viewModel.duration
         viewModel.audioEngine.seek(to: seekTime)

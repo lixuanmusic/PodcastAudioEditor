@@ -148,12 +148,19 @@ class AudioPlayerViewModel: ObservableObject {
         }
     }
     
-    // WaveSurfer 逻辑：基于音频时长计算实际波形宽度
+    // WaveSurfer 逻辑：基于音频时长和窗口宽度计算实际波形宽度
     private func calculateActualWaveformWidth() -> CGFloat {
         guard duration > 0 else { return waveformWidth }
-        let minPxPerSec: CGFloat = 50.0  // 与 WaveSurfer 保持一致
-        let baseWaveformWidth = CGFloat(duration) * minPxPerSec
-        return baseWaveformWidth * waveformScale
+        
+        // minPxPerSec 是最小像素密度，如果窗口更宽则填满窗口
+        let minPxPerSec: CGFloat = 50.0
+        let minWidth = CGFloat(duration) * minPxPerSec
+        
+        // scale=1.0 时，波形填满窗口（或使用最小宽度，取较大值）
+        let baseWidth = max(waveformWidth, minWidth)
+        
+        // 应用缩放因子
+        return baseWidth * waveformScale
     }
     
     func setWaveformScrollOffset(_ offset: CGFloat) {
