@@ -26,16 +26,28 @@ struct WaveformView: View {
                         
                         let height = canvasSize.height
                         let barWidth: CGFloat = 3.0      // 竖条宽度 3px
-                        let barGap: CGFloat = 2.0        // 竖条间隔 2px
                         let barRadius: CGFloat = 3.0     // 竖条圆角 3px
-                        let barPitch = barWidth + barGap // 竖条周期（宽度 + 间隔）
-                        let scale = viewModel.waveformScale
                         
-                        // 使用第一声道数据（如果是多声道则合并显示）
+                        // 使用第一声道数据
                         let displayWaveformData = waveformData.isEmpty ? [] : waveformData[0]
+                        guard !displayWaveformData.isEmpty else { return }
+                        
+                        let dataPointCount = CGFloat(displayWaveformData.count)
+                        
+                        // Canvas的canvasSize.width已经是缩放后的宽度（由外层ZStack.frame设置）
+                        // 不需要再乘以scale
+                        let totalWidth = canvasSize.width
+                        
+                        // 动态计算竖条间隔：使波形数据点均匀分布在总宽度上
+                        // 每个数据点占据的宽度 = 总宽度 / 数据点数量
+                        let pixelPerDataPoint = totalWidth / dataPointCount
+                        
+                        // 竖条间隔 = 每个数据点的宽度 - 竖条宽度（保留最小间隔）
+                        let barGap = max(1.0, pixelPerDataPoint - barWidth)
+                        let barPitch = barWidth + barGap // 竖条周期
                         
                         for (index, amplitude) in displayWaveformData.enumerated() {
-                            let x = CGFloat(index) * barPitch * scale
+                            let x = CGFloat(index) * barPitch
                             
                             // 计算竖条高度（归一化到 0-1）
                             let normalizedAmplitude = min(max(CGFloat(amplitude), 0), 1.0)
@@ -46,14 +58,14 @@ struct WaveformView: View {
                             let barRect = CGRect(
                                 x: x,
                                 y: barY,
-                                width: barWidth * scale,
+                                width: barWidth,
                                 height: barHeight
                             )
                             
                             var path = Path()
                             path.addRoundedRect(
                                 in: barRect,
-                                cornerSize: CGSize(width: barRadius * scale, height: barRadius * scale)
+                                cornerSize: CGSize(width: barRadius, height: barRadius)
                             )
                             
                             context.fill(path, with: .color(Color.primary.opacity(0.6)))
