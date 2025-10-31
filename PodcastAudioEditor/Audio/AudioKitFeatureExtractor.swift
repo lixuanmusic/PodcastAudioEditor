@@ -1,9 +1,87 @@
 import AVFoundation
 import Accelerate
 
-// AudioKit 风格的特征提取器
-// 注意：如果项目中没有 AudioKit，此实现使用 AVAudioEngine + Accelerate 的优化组合
-final class AudioKitFeatureExtractor: FeatureExtractorProtocol {
+// 特征提取配置
+struct FeatureExtractionConfig {
+    var extractEnergy: Bool = true       // 能量（必须，用于静音和响度检测）
+    var extractZCR: Bool = false         // 零交叉率（可选，辅助分类）
+    var extractSpectralCentroid: Bool = false  // 谱质心（可选，辅助分类）
+    var extractMFCC: Bool = true         // MFCC（建议，用于分类和发言人识别）
+    
+    // 极速模式：只提取能量（静音+响度检测，无FFT）
+    static let ultraFast = FeatureExtractionConfig(
+        extractEnergy: true,
+        extractZCR: false,
+        extractSpectralCentroid: false,
+        extractMFCC: false
+    )
+    
+    // 快速模式：能量+MFCC（支持分类和发言人识别）
+    static let fast = FeatureExtractionConfig(
+        extractEnergy: true,
+        extractZCR: false,
+        extractSpectralCentroid: false,
+        extractMFCC: true
+    )
+    
+    // 完整模式：提取所有特征
+    static let full = FeatureExtractionConfig(
+        extractEnergy: true,
+        extractZCR: true,
+        extractSpectralCentroid: true,
+        extractMFCC: true
+    )
+}
+
+// 性能统计结构
+struct PerformanceMetrics {
+    var energyTime: TimeInterval = 0
+    var zcrTime: TimeInterval = 0
+    var spectralCentroidTime: TimeInterval = 0
+    var fftTime: TimeInterval = 0
+    var mfccTime: TimeInterval = 0
+    var frameCount: Int = 0
+    
+    var totalTime: TimeInterval {
+        energyTime + zcrTime + spectralCentroidTime + fftTime + mfccTime
+    }
+    
+    var report: String {
+        """
+        ⏱️  性能分析报告
+        ===================
+        总帧数: \(frameCount)
+        总耗时: \(String(format: "%.3f", totalTime))秒
+        
+        各特征耗时:
+        - 能量计算: \(String(format: "%.3f", energyTime))秒 (\(String(format: "%.1f", energyTime/totalTime*100))%)
+        - 零交叉率: \(String(format: "%.3f", zcrTime))秒 (\(String(format: "%.1f", zcrTime/totalTime*100))%)
+        - 谱质心: \(String(format: "%.3f", spectralCentroidTime))秒 (\(String(format: "%.1f", spectralCentroidTime/totalTime*100))%)
+        - FFT计算: \(String(format: "%.3f", fftTime))秒 (\(String(format: "%.1f", fftTime/totalTime*100))%)
+        - MFCC: \(String(format: "%.3f", mfccTime))秒 (\(String(format: "%.1f", mfccTime/totalTime*100))%)
+        
+        平均每帧耗时: \(String(format: "%.4f", totalTime/Double(frameCount)))秒 (约\(String(format: "%.2f", totalTime/Double(frameCount) * 1000))毫秒)
+        ===================
+        """
+    }
+}
+
+// 声学特征数据结构
+struct AcousticFeatures {
+    let timestamp: Double  // 时间戳（秒）
+    let energy: Float      // 能量（dB）
+    let zcr: Float         // 零交叉率（0-1）
+    let spectralCentroid: Float  // 谱质心（Hz）
+    let mfccValues: [Float]      // MFCC系数（13维）
+    let isVoiced: Bool     // 是否有声段
+    
+    var description: String {
+        "时间: \(String(format: "%.2f", timestamp))s, 能量: \(String(format: "%.1f", energy))dB, ZCR: \(String(format: "%.3f", zcr)), 质心: \(String(format: "%.0f", spectralCentroid))Hz, 有声: \(isVoiced)"
+    }
+}
+
+// 声学特征提取器（优化实现）
+final class AcousticFeatureExtractor: FeatureExtractorProtocol {
     private let audioFile: AVAudioFile
     private let sampleRate: Double
     private let frameSize: Int = 1024  // 与 Accelerate 版本保持一致
@@ -13,7 +91,7 @@ final class AudioKitFeatureExtractor: FeatureExtractorProtocol {
     var features: [AcousticFeatures] = []
     var isProcessing: Bool = false
     var performanceMetrics = PerformanceMetrics()
-    var extractorName: String { "AudioKit" }
+    var extractorName: String { "Acoustic" }
     
     init?(audioFileURL: URL, config: FeatureExtractionConfig = .fast) {
         guard let audioFile = try? AVAudioFile(forReading: audioFileURL) else {
@@ -22,7 +100,7 @@ final class AudioKitFeatureExtractor: FeatureExtractorProtocol {
         self.audioFile = audioFile
         self.sampleRate = audioFile.processingFormat.sampleRate
         self.config = config
-        print("📋 [AudioKit] 特征提取配置: 能量=\(config.extractEnergy), ZCR=\(config.extractZCR), 谱质心=\(config.extractSpectralCentroid), MFCC=\(config.extractMFCC)")
+        print("📋 特征提取配置: 能量=\(config.extractEnergy), ZCR=\(config.extractZCR), 谱质心=\(config.extractSpectralCentroid), MFCC=\(config.extractMFCC)")
     }
     
     // 异步提取所有特征
@@ -35,7 +113,7 @@ final class AudioKitFeatureExtractor: FeatureExtractorProtocol {
                 DispatchQueue.main.async {
                     self?.isProcessing = false
                     if let metrics = self?.performanceMetrics {
-                        print("[AudioKit] \(metrics.report)")
+                        print(metrics.report)
                     }
                     completion()
                 }
@@ -53,13 +131,13 @@ final class AudioKitFeatureExtractor: FeatureExtractorProtocol {
                 }
                 
                 let overallTime = CFAbsoluteTimeGetCurrent() - overallStart
-                print("⏱️  [AudioKit] 总分析耗时: \(String(format: "%.3f", overallTime))秒")
+                print("⏱️  总分析耗时: \(String(format: "%.3f", overallTime))秒")
                 
                 DispatchQueue.main.async {
                     self.features = features
                 }
             } catch {
-                print("❌ [AudioKit] 特征提取失败: \(error.localizedDescription)")
+                print("❌ 特征提取失败: \(error.localizedDescription)")
             }
         }
     }
@@ -81,7 +159,7 @@ final class AudioKitFeatureExtractor: FeatureExtractorProtocol {
         let numFrames = (totalSamples - frameSize) / hopSize + 1
         performanceMetrics.frameCount = numFrames
         
-        print("📊 [AudioKit] 开始提取特征: \(numFrames)帧, \(totalSamples)采样点")
+        print("📊 开始提取特征: \(numFrames)帧, \(totalSamples)采样点")
         let overallStart = CFAbsoluteTimeGetCurrent()
         
         // AudioKit 风格：使用批量处理和优化的向量化操作
@@ -188,7 +266,7 @@ final class AudioKitFeatureExtractor: FeatureExtractorProtocol {
                         let avgTimePerFrame = elapsed / Double(frameIdx + 1)
                         let estimatedTotal = avgTimePerFrame * Double(numFrames)
                         let remaining = estimatedTotal - elapsed
-                        print("⏳ [AudioKit] 进度: \(frameIdx)/\(numFrames)帧, 已用: \(String(format: "%.1f", elapsed))秒, 预计剩余: \(String(format: "%.1f", remaining))秒")
+                        print("⏳ 进度: \(frameIdx)/\(numFrames)帧, 已用: \(String(format: "%.1f", elapsed))秒, 预计剩余: \(String(format: "%.1f", remaining))秒")
                     }
                 }
             }
@@ -197,7 +275,7 @@ final class AudioKitFeatureExtractor: FeatureExtractorProtocol {
         let sortedFeatures = allFeatures.compactMap { $0 }.sorted { $0.timestamp < $1.timestamp }
         
         onProgress(1.0)
-        print("✓ [AudioKit] 特征提取完成: 共\(sortedFeatures.count)个数据点")
+        print("✓ 特征提取完成: 共\(sortedFeatures.count)个数据点")
         return sortedFeatures
     }
     
