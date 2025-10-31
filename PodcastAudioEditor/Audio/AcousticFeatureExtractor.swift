@@ -80,7 +80,7 @@ struct AcousticFeatures {
     }
 }
 
-final class AcousticFeatureExtractor {
+final class AccelerateFeatureExtractor: FeatureExtractorProtocol {
     private let audioFile: AVAudioFile
     private let sampleRate: Double
     private let frameSize: Int = 1024  // 分帧大小（约23ms @ 44100Hz，满足语音分析需求）
@@ -90,6 +90,7 @@ final class AcousticFeatureExtractor {
     var features: [AcousticFeatures] = []
     var isProcessing: Bool = false
     var performanceMetrics = PerformanceMetrics()  // 性能统计
+    var extractorName: String { "Accelerate" }
     
     init?(audioFileURL: URL, config: FeatureExtractionConfig = .fast) {
         guard let audioFile = try? AVAudioFile(forReading: audioFileURL) else {

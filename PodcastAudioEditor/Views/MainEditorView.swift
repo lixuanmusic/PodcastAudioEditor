@@ -19,16 +19,34 @@ struct MainEditorView: View {
                         Label("导入", systemImage: "tray.and.arrow.down")
                     }
                     
-                    // 分析按钮
-                    Button {
-                        if let url = currentFileURL {
-                            analysisVM.analyzeAudioFile(url: url)
-                            AnalysisWindowManager.shared.show(analysisVM: analysisVM)
+                    // 分析按钮和选项
+                    HStack(spacing: 8) {
+                        // 提取器选择
+                        Picker("提取器", selection: $analysisVM.selectedExtractor) {
+                            ForEach(FeatureExtractorType.allCases, id: \.self) { type in
+                                Text(type.description).tag(type)
+                            }
                         }
-                    } label: {
-                        Label("分析", systemImage: "waveform.circle")
+                        .pickerStyle(.menu)
+                        .frame(width: 150)
+                        .disabled(analysisVM.isAnalyzing)
+                        
+                        // 性能对比开关
+                        Toggle("性能对比", isOn: $analysisVM.comparePerformance)
+                            .toggleStyle(.checkbox)
+                            .disabled(analysisVM.isAnalyzing)
+                        
+                        // 分析按钮
+                        Button {
+                            if let url = currentFileURL {
+                                analysisVM.analyzeAudioFile(url: url)
+                                AnalysisWindowManager.shared.show(analysisVM: analysisVM)
+                            }
+                        } label: {
+                            Label("分析", systemImage: "waveform.circle")
+                        }
+                        .disabled(currentFileURL == nil || analysisVM.isAnalyzing)
                     }
-                    .disabled(currentFileURL == nil || analysisVM.isAnalyzing)
 
                     Button {
                         viewModel.togglePlayPause()
