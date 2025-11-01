@@ -3,7 +3,6 @@ import Accelerate
 
 // 音频处理配置
 struct AudioProcessingConfig {
-    var volumeBalanceEnabled: Bool = false
     var targetLUFS: Float = -16.0  // 目标响度（LUFS）
     var maxGainDB: Float = 12.0    // 最大增益（dB）
     var minGainDB: Float = -12.0   // 最小增益（dB）
@@ -14,21 +13,19 @@ struct AudioProcessingConfig {
 class AudioProcessor: ObservableObject {
     @Published var config = AudioProcessingConfig()
     @Published var isProcessing = false
-    @Published var currentGainDB: Float = 0.0  // 当前应用的增益（dB）
-    @Published var averageGainDB: Float = 0.0  // 平均增益（dB）
     @Published var gains: [Float] = []  // 计算好的增益数组
-    
+
     // 根据声学特征计算音量调节增益
     func calculateVolumeGains(features: [AcousticFeatures]) -> [Float] {
         guard !features.isEmpty else { return [] }
-        
+
         var gains: [Float] = []
         gains.reserveCapacity(features.count)
-        
+
         // 计算每帧的目标增益
         for feature in features {
             let gain: Float
-            
+
             // 静音段保持原样
             if !feature.isVoiced {
                 gain = 0.0
@@ -38,79 +35,56 @@ class AudioProcessor: ObservableObject {
                 // 简化：假设能量 dB 与 LUFS 成正比关系
                 let currentLoudness = feature.energy
                 let targetLoudness = config.targetLUFS
-                
+
                 // 计算需要的增益
                 var calculatedGain = targetLoudness - currentLoudness
-                
+
                 // 限制在范围内
                 calculatedGain = max(config.minGainDB, min(config.maxGainDB, calculatedGain))
-                
+
                 gain = calculatedGain
             }
-            
+
             gains.append(gain)
         }
-        
+
         // 平滑增益曲线（避免突变）
         let smoothedGains = smoothGains(gains, windowSize: config.smoothingWindow)
-        
+
         // 保存增益数组并计算统计信息
         DispatchQueue.main.async {
             self.gains = smoothedGains
-            
-            // 计算平均增益（排除静音段）
-            let nonZeroGains = smoothedGains.filter { abs($0) > 0.1 }
-            if !nonZeroGains.isEmpty {
-                self.averageGainDB = nonZeroGains.reduce(0, +) / Float(nonZeroGains.count)
-            } else {
-                self.averageGainDB = 0
-            }
-            
-            print("✓ 增益计算完成: 平均增益 \(String(format: "%.1f", self.averageGainDB))dB")
+
+            print("✓ 增益计算完成: \(smoothedGains.count)个值")
         }
-        
+
         return smoothedGains
     }
-    
-    // 更新当前播放位置的增益显示
-    func updateCurrentGain(for time: TimeInterval, hopSize: Int = 768, sampleRate: Double = 44100) {
-        guard !gains.isEmpty else {
-            currentGainDB = 0
-            return
-        }
-        
-        // 计算对应的帧索引
-        let sampleIdx = Int(time * sampleRate)
-        let frameIdx = sampleIdx / hopSize
-        let gainIdx = min(frameIdx, gains.count - 1)
-        
-        currentGainDB = gains[gainIdx]
-    }
-    
+
     // 平滑增益曲线
     private func smoothGains(_ gains: [Float], windowSize: Int) -> [Float] {
         guard gains.count > windowSize else { return gains }
-        
+
         var smoothed: [Float] = []
         smoothed.reserveCapacity(gains.count)
-        
+
         let halfWindow = windowSize / 2
-        
+
         for i in 0..<gains.count {
             let startIdx = max(0, i - halfWindow)
             let endIdx = min(gains.count, i + halfWindow + 1)
-            
+
             var sum: Float = 0
             var count: Float = 0
-            
+
             for j in startIdx..<endIdx {
                 sum += gains[j]
                 count += 1
             }
-            
+
             smoothed.append(sum / count)
         }
-        
+
         return smoothed
     }
     

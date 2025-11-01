@@ -13,6 +13,7 @@
 		462AF47F2EB32BA100C25E28 /* Accelerate.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 462AF47E2EB32BA100C25E28 /* Accelerate.framework */; };
 		462AF4812EB32BA900C25E28 /* CoreMedia.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 462AF4802EB32BA900C25E28 /* CoreMedia.framework */; };
 		462AF4832EB32BB000C25E28 /* CoreAudio.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 462AF4822EB32BB000C25E28 /* CoreAudio.framework */; };
+		468AC8A12EB52EC600257A52 /* AudioUnit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 468AC8A02EB52EC600257A52 /* AudioUnit.framework */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -42,6 +43,7 @@
 		462AF47E2EB32BA100C25E28 /* Accelerate.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Accelerate.framework; path = Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS18.5.sdk/System/Library/Frameworks/Accelerate.framework; sourceTree = DEVELOPER_DIR; };
 		462AF4802EB32BA900C25E28 /* CoreMedia.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = CoreMedia.framework; path = Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS18.5.sdk/System/Library/Frameworks/CoreMedia.framework; sourceTree = DEVELOPER_DIR; };
 		462AF4822EB32BB000C25E28 /* CoreAudio.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = CoreAudio.framework; path = Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS18.5.sdk/System/Library/Frameworks/CoreAudio.framework; sourceTree = DEVELOPER_DIR; };
+		468AC8A02EB52EC600257A52 /* AudioUnit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = AudioUnit.framework; path = Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS18.5.sdk/System/Library/Frameworks/AudioUnit.framework; sourceTree = DEVELOPER_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -86,6 +88,7 @@
 				462AF47D2EB32B9900C25E28 /* CoreAudioKit.framework in Frameworks */,
 				462AF47B2EB32B9200C25E28 /* AudioToolbox.framework in Frameworks */,
 				462AF4812EB32BA900C25E28 /* CoreMedia.framework in Frameworks */,
+				468AC8A12EB52EC600257A52 /* AudioUnit.framework in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -130,6 +133,7 @@
 		462AF4772EB32B8500C25E28 /* Frameworks */ = {
 			isa = PBXGroup;
 			children = (
+				468AC8A02EB52EC600257A52 /* AudioUnit.framework */,
 				462AF4822EB32BB000C25E28 /* CoreAudio.framework */,
 				462AF4802EB32BA900C25E28 /* CoreMedia.framework */,
 				462AF47E2EB32BA100C25E28 /* Accelerate.framework */,

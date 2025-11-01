@@ -85,7 +85,7 @@ struct MainEditorView: View {
                 }
                 
                 Divider()
-                
+
                 // 音频处理面板
                 AudioProcessingPanel(
                     processor: audioProcessor,
@@ -94,13 +94,19 @@ struct MainEditorView: View {
                     currentFileURL: $currentFileURL
                 )
                 .frame(height: 180)
+
+                Divider()
+
+                // AU 效果器链面板
+                EffectSlotsPanel(audioEngine: viewModel.audioEngine)
+                    .frame(height: 280)
             }
             
-            // 滚动条 - 在音频处理面板上方
+            // 滚动条 - 在所有底部面板上方
             if viewModel.isWaveformScrollable {
                 HorizontalScrollbar(viewModel: viewModel)
                     .frame(height: 12)
-                    .offset(y: -180) // 向上偏移音频处理面板的高度
+                    .offset(y: -(180 + 280)) // 向上偏移两个面板的高度
             }
         }
         .ignoresSafeArea(.all, edges: .bottom)
