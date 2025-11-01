@@ -95,17 +95,25 @@ final class AudioEngine: ObservableObject {
             // 附加播放器节点
             newEngine.attach(newPlayerNode)
 
-            // 附加效果器节点（如果有的话）
-            let loadedUnits = effectChain.getLoadedAudioUnits()
-            for unit in loadedUnits {
-                // 直接附加到新引擎（不需要检查旧引擎）
+            // 获取应该启用的效果器（考虑全局开关和插槽开关）
+            let effectsToAttach: [AVAudioUnit]
+            if effectChain.isEnabled {
+                effectsToAttach = effectChain.getEnabledAudioUnits()
+                print("📦 效果链启用，附加 \(effectsToAttach.count) 个已启用的效果器")
+            } else {
+                effectsToAttach = []
+                print("📦 效果链禁用，不附加效果器")
+            }
+
+            // 附加效果器节点
+            for unit in effectsToAttach {
                 newEngine.attach(unit)
             }
 
             // 构建连接：PlayerNode -> Effect1 -> Effect2 -> Effect3 -> Effect4 -> MainMixer -> Output
             var previousNode: AVAudioNode = newPlayerNode
 
-            for unit in loadedUnits {
+            for unit in effectsToAttach {
                 newEngine.connect(previousNode, to: unit, format: format)
                 previousNode = unit
             }
@@ -177,14 +185,15 @@ final class AudioEngine: ObservableObject {
     }
 
     func pause() {
-        print("⏸️ pause() 调用")
+        print("⏸️ pause() 调用 - currentTime: \(currentTime)")
         playerNode?.pause()
-        hasScheduledSegment = false  // 重置调度标志以便下次播放可以调度
+        // 注意：暂停时不重置 hasScheduledSegment，因为段仍然有效
+        // 只有 stop() 或 seek() 才需要重置调度状态
         DispatchQueue.main.async {
             self.isPlaying = false
             self.stopTimer()
         }
-        print("⏸️ 暂停完成 - hasScheduledSegment已重置为false")
+        print("⏸️ 暂停完成 - hasScheduledSegment保持为: \(hasScheduledSegment)")
     }
 
     func stop() {
@@ -334,12 +343,34 @@ final class AudioEngine: ObservableObject {
         guard let playerNode = playerNode,
               let audioFile = audioFile,
               let engine = engine else {
+            print("⚠️ reconnectEffectChain - 没有引擎或音频文件，跳过重连")
             return
         }
 
-        // 暂停播放
+        print("🔄 开始重新连接效果链 - wasPlaying: \(isPlaying), currentTime: \(currentTime)")
+
+        // 保存当前状态
         let wasPlaying = isPlaying
+        let savedTime = currentTime
+
+        // 停止播放节点
         playerNode.stop()
+        hasScheduledSegment = false  // 重置调度标志，因为要重建整个引擎
+
+        // 获取当前的效果器单元（在停止引擎之前）
+        let currentEffects = effectChain.getEnabledAudioUnits()
+        print("🔗 准备分离 \(currentEffects.count) 个效果器节点")
+
+        // 停止并分离旧引擎中的所有节点
+        if engine.isRunning {
+            engine.stop()
+        }
+
+        // 关键：从旧引擎中分离所有 AudioUnit 节点
+        for unit in currentEffects {
+            print("🔌 从旧引擎分离效果器: \(unit)")
+            engine.detach(unit)
+        }
 
         do {
             // 创建一个新引擎并重新附加所有节点
@@ -348,9 +379,19 @@ final class AudioEngine: ObservableObject {
 
             newEngine.attach(newPlayerNode)
 
-            // 附加效果器节点
-            let loadedUnits = effectChain.getLoadedAudioUnits()
-            for unit in loadedUnits {
+            // 获取应该启用的效果器（考虑全局开关和插槽开关）
+            let effectsToAttach: [AVAudioUnit]
+            if effectChain.isEnabled {
+                effectsToAttach = effectChain.getEnabledAudioUnits()
+                print("📦 效果链启用，附加 \(effectsToAttach.count) 个已启用的效果器到新引擎")
+            } else {
+                effectsToAttach = []
+                print("📦 效果链禁用，不附加效果器到新引擎")
+            }
+
+            // 附加效果器节点到新引擎
+            for unit in effectsToAttach {
+                print("🔌 附加效果器到新引擎: \(unit)")
                 newEngine.attach(unit)
             }
 
@@ -358,7 +399,7 @@ final class AudioEngine: ObservableObject {
             let format = audioFile.processingFormat
             var previousNode: AVAudioNode = newPlayerNode
 
-            for unit in loadedUnits {
+            for unit in effectsToAttach {
                 newEngine.connect(previousNode, to: unit, format: format)
                 previousNode = unit
             }
@@ -366,21 +407,33 @@ final class AudioEngine: ObservableObject {
             // 连接到主混音器
             newEngine.connect(previousNode, to: newEngine.mainMixerNode, format: format)
 
-            // 准备新引擎
+            // 准备并启动新引擎
             try newEngine.prepare()
+            try newEngine.start()
 
             // 替换引擎
             self.engine = newEngine
             self.playerNode = newPlayerNode
 
-            print("✓ 效果链已重新连接")
+            print("✓ 效果链已重新连接，引擎已启动")
 
-            // 恢复播放
+            // 重新调度音频（从保存的时间位置开始）
+            scheduleAudioFile(at: savedTime)
+            hasScheduledSegment = true
+            print("✅ 已重新调度音频从 \(savedTime)s")
+
+            // 如果之前在播放，恢复播放
             if wasPlaying {
-                scheduleAudioFile(at: currentTime)
+                print("▶️ 恢复播放")
                 newPlayerNode.play()
                 DispatchQueue.main.async {
+                    self.isPlaying = true
                     self.startTimer()
+                }
+            } else {
+                print("⏸️ 保持暂停状态（音频已调度）")
+                DispatchQueue.main.async {
+                    self.isPlaying = false
                 }
             }
         } catch {

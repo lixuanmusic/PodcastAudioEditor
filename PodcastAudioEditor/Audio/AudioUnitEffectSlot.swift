@@ -10,14 +10,27 @@ class AudioUnitEffectSlot: ObservableObject {
     // AU 效果器单元
     private(set) var audioUnit: AVAudioUnit?
 
-    // 是否启用
-    @Published var isEnabled: Bool = false
+    // 是否正在内部更新（避免触发回调）
+    private var isInternalUpdate = false
+
+    // 是否启用（改变时通知效果链）
+    @Published var isEnabled: Bool = false {
+        didSet {
+            if oldValue != isEnabled && !isInternalUpdate {
+                print("🔄 插槽 \(slotIndex) 启用状态改变: \(isEnabled)")
+                onEnabledChanged?()
+            }
+        }
+    }
 
     // 效果器名称
     @Published var effectName: String = "未选择"
 
     // 效果器类型描述
     @Published var effectTypeDescription: String = ""
+
+    // 启用状态改变回调
+    var onEnabledChanged: (() -> Void)?
 
     init(slotIndex: Int) {
         self.slotIndex = slotIndex
@@ -27,12 +40,16 @@ class AudioUnitEffectSlot: ObservableObject {
     func loadAudioUnit(_ unit: AVAudioUnit, withName name: String) {
         self.audioUnit = unit
         self.effectName = name
-        self.isEnabled = true
 
         // 获取效果器类型描述
         let auAudioUnit = unit.auAudioUnit
         let componentDescription = auAudioUnit.componentDescription
         self.effectTypeDescription = "\(componentDescription.componentType):\(componentDescription.componentSubType)"
+
+        // 设置为启用状态，但不触发 didSet 回调（避免双重重连）
+        isInternalUpdate = true
+        self.isEnabled = true
+        isInternalUpdate = false
 
         print("✓ 插槽 \(slotIndex) 已加载效果器: \(name)")
     }
@@ -42,7 +59,12 @@ class AudioUnitEffectSlot: ObservableObject {
         audioUnit = nil
         effectName = "未选择"
         effectTypeDescription = ""
-        isEnabled = false
+
+        // 设置为禁用状态，但不触发 didSet 回调（避免双重重连）
+        isInternalUpdate = true
+        self.isEnabled = false
+        isInternalUpdate = false
+
         print("✓ 插槽 \(slotIndex) 已卸载效果器")
     }
 

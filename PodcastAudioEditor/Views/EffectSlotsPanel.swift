@@ -4,6 +4,7 @@ import AVFoundation
 // 单个效果器插槽 UI
 struct EffectSlotView: View {
     @ObservedObject var slot: AudioUnitEffectSlot
+    @ObservedObject var effectChain: AudioEffectChain
     @State private var showEffectPicker = false
     @State private var showEffectUI = false
 
@@ -21,6 +22,7 @@ struct EffectSlotView: View {
                 Toggle("", isOn: $slot.isEnabled)
                     .toggleStyle(.switch)
                     .controlSize(.mini)
+                    .disabled(slot.audioUnit == nil)  // 没有加载效果器时禁用开关
             }
 
             // 效果器名称
@@ -66,7 +68,8 @@ struct EffectSlotView: View {
                     // 卸载效果器按钮
                     if slot.audioUnit != nil {
                         Button {
-                            slot.unloadAudioUnit()
+                            // 通过 AudioEffectChain 卸载，确保触发回调
+                            effectChain.unloadAudioUnit(at: slot.slotIndex)
                         } label: {
                             Image(systemName: "minus.circle.fill")
                                 .font(.caption2)
@@ -82,7 +85,7 @@ struct EffectSlotView: View {
         .background(Color(NSColor.controlBackgroundColor))
         .cornerRadius(4)
         .sheet(isPresented: $showEffectPicker) {
-            EffectPickerView(slot: slot, isPresented: $showEffectPicker)
+            EffectPickerView(slot: slot, effectChain: effectChain, isPresented: $showEffectPicker)
         }
         .sheet(isPresented: $showEffectUI) {
             EffectUIWrapperView(slot: slot, isPresented: $showEffectUI)
@@ -93,6 +96,7 @@ struct EffectSlotView: View {
 // 效果器选择器
 struct EffectPickerView: View {
     @ObservedObject var slot: AudioUnitEffectSlot
+    @ObservedObject var effectChain: AudioEffectChain
     @Binding var isPresented: Bool
     @State private var selectedComponent: AVAudioUnitComponent?
     @State private var isLoading = false
@@ -169,7 +173,8 @@ struct EffectPickerView: View {
         do {
             let audioUnit = try await AudioUnitLoader.createAudioUnit(from: component)
             DispatchQueue.main.async {
-                slot.loadAudioUnit(audioUnit, withName: component.name ?? "Unknown")
+                // 通过 AudioEffectChain 加载，确保触发回调
+                effectChain.loadAudioUnit(at: slot.slotIndex, unit: audioUnit, withName: component.name ?? "Unknown")
                 isPresented = false
                 isLoading = false
             }
@@ -254,7 +259,7 @@ struct EffectSlotsPanel: View {
             VStack(spacing: 8) {
                 ForEach(0..<4, id: \.self) { index in
                     if let slot = audioEngine.effectChain.getSlot(index) {
-                        EffectSlotView(slot: slot)
+                        EffectSlotView(slot: slot, effectChain: audioEngine.effectChain)
                     }
                 }
             }

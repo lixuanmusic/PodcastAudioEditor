@@ -1,12 +1,19 @@
 import AVFoundation
 
-// 音效链管理器：管理4个 AU 效果器插槽
+// 音效链管理器:管理4个 AU 效果器插槽
 class AudioEffectChain: ObservableObject {
     // 4个效果器插槽
     @Published var slots: [AudioUnitEffectSlot] = []
 
     // 是否启用整个效果链
-    @Published var isEnabled: Bool = true
+    @Published var isEnabled: Bool = true {
+        didSet {
+            if oldValue != isEnabled {
+                print("🔄 效果链启用状态改变: \(isEnabled)")
+                onEffectChainChanged?()
+            }
+        }
+    }
 
     // 用于通知AudioEngine重新连接效果链
     var onEffectChainChanged: (() -> Void)?
@@ -14,6 +21,13 @@ class AudioEffectChain: ObservableObject {
     init() {
         // 初始化4个插槽
         slots = (0..<4).map { AudioUnitEffectSlot(slotIndex: $0) }
+
+        // 为每个插槽设置启用状态改变回调
+        for slot in slots {
+            slot.onEnabledChanged = { [weak self] in
+                self?.onEffectChainChanged?()
+            }
+        }
     }
 
     // 获取指定插槽
