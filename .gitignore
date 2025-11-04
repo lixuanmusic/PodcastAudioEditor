@@ -1,0 +1,49 @@
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Xcode
+**/build/
+DerivedData/
+*.xcworkspace/xcuserdata/
+*.xcodeproj/xcuserdata/
+*.xcodeproj/project.xcworkspace/xcuserdata/
+*.xcuserdatad/
+*.xcscmblueprint
+
+# SwiftPM
+.build/
+.swiftpm/
+
+# Logs
+*.log
+
+# Archives
+*.xcarchive
+
+# User-specific
+*.moved-aside
+*.pbxuser
+*.mode1v3
+*.mode2v3
+*.perspectivev3
+
+# Obj-C/Swift artifacts
+*.hmap
+
+# CocoaPods (若使用时再取消注释)
+# Pods/
+# Podfile.lock
+
+# Carthage (若使用时再取消注释)
+# Carthage/Build/
+
+# Fastlane
+fastlane/report.xml
+fastlane/Preview.html
+fastlane/screenshots
+fastlane/test_output
+
+# SPM resolved (可选)
+Package.resolved
