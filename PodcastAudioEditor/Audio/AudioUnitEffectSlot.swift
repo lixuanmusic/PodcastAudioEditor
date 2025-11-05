@@ -84,12 +84,7 @@ class AudioUnitEffectSlot: ObservableObject {
         let scrollView = NSScrollView()
         let stackView = NSStackView()
         stackView.orientation = .vertical
-        stackView.spacing = 12
-
-        // 标题
-        let titleLabel = NSTextField(labelWithString: "效果器: \(effectName)")
-        titleLabel.font = NSFont.boldSystemFont(ofSize: 14)
-        stackView.addArrangedSubview(titleLabel)
+        stackView.spacing = 16
 
         // 尝试显示参数信息
         let auAudioUnit = audioUnit.auAudioUnit
@@ -97,34 +92,35 @@ class AudioUnitEffectSlot: ObservableObject {
         let parameterCount = parameters.count
 
         if parameterCount > 0 {
-            let paramInfo = NSTextField(wrappingLabelWithString: "此效果器具有 \(parameterCount) 个参数。请在下方调整参数值：")
-            paramInfo.lineBreakMode = .byWordWrapping
-            stackView.addArrangedSubview(paramInfo)
-
             // 添加参数控制
             for parameter in parameters.prefix(10) {
-                // 参数名标签
-                let paramNameLabel = NSTextField(labelWithString: parameter.displayName)
-                paramNameLabel.font = NSFont.systemFont(ofSize: 12, weight: .semibold)
-                stackView.addArrangedSubview(paramNameLabel)
-
-                // 参数行: 标签 + 滑块 + 值标签
+                // 参数行: 参数名 + 最小值 + 滑块 + 最大值 + 当前值
                 let paramRowView = NSView()
                 paramRowView.translatesAutoresizingMaskIntoConstraints = false
 
+                // 参数名标签
+                let paramNameLabel = NSTextField(labelWithString: parameter.displayName)
+                paramNameLabel.font = NSFont.systemFont(ofSize: 12, weight: .semibold)
+                paramNameLabel.translatesAutoresizingMaskIntoConstraints = false
+
+                // 最小值标签
                 let minLabel = NSTextField(labelWithString: String(format: "%.2f", parameter.minValue))
                 minLabel.font = NSFont.systemFont(ofSize: 10)
                 minLabel.isEditable = false
+                minLabel.translatesAutoresizingMaskIntoConstraints = false
 
+                // 最大值标签
                 let maxLabel = NSTextField(labelWithString: String(format: "%.2f", parameter.maxValue))
                 maxLabel.font = NSFont.systemFont(ofSize: 10)
                 maxLabel.isEditable = false
+                maxLabel.translatesAutoresizingMaskIntoConstraints = false
 
                 // 获取当前参数值
                 let currentValue = parameter.value
                 let valueLabel = NSTextField(labelWithString: String(format: "%.2f", currentValue))
                 valueLabel.font = NSFont.systemFont(ofSize: 11)
                 valueLabel.alignment = .center
+                valueLabel.translatesAutoresizingMaskIntoConstraints = false
 
                 let slider = NSSlider(value: Double(currentValue), minValue: Double(parameter.minValue), maxValue: Double(parameter.maxValue), target: nil, action: nil)
                 slider.translatesAutoresizingMaskIntoConstraints = false
@@ -155,29 +151,53 @@ class AudioUnitEffectSlot: ObservableObject {
                 // 保存handler引用以防止被释放
                 objc_setAssociatedObject(slider, "handler", handler, .OBJC_ASSOCIATION_RETAIN)
 
-                paramRowView.addSubview(minLabel)
-                paramRowView.addSubview(slider)
-                paramRowView.addSubview(valueLabel)
-                paramRowView.addSubview(maxLabel)
+                // 添加参数名到顶部
+                paramRowView.addSubview(paramNameLabel)
+                NSLayoutConstraint.activate([
+                    paramNameLabel.leadingAnchor.constraint(equalTo: paramRowView.leadingAnchor),
+                    paramNameLabel.topAnchor.constraint(equalTo: paramRowView.topAnchor),
+                    paramNameLabel.trailingAnchor.constraint(equalTo: paramRowView.trailingAnchor)
+                ])
+
+                // 创建控制行
+                let controlRowView = NSView()
+                controlRowView.translatesAutoresizingMaskIntoConstraints = false
+                paramRowView.addSubview(controlRowView)
+
+                // 添加控制元素到控制行
+                controlRowView.addSubview(minLabel)
+                controlRowView.addSubview(slider)
+                controlRowView.addSubview(maxLabel)
+                controlRowView.addSubview(valueLabel)
 
                 NSLayoutConstraint.activate([
-                    minLabel.leadingAnchor.constraint(equalTo: paramRowView.leadingAnchor),
-                    minLabel.centerYAnchor.constraint(equalTo: paramRowView.centerYAnchor),
+                    // 控制行约束
+                    controlRowView.leadingAnchor.constraint(equalTo: paramRowView.leadingAnchor),
+                    controlRowView.trailingAnchor.constraint(equalTo: paramRowView.trailingAnchor),
+                    controlRowView.topAnchor.constraint(equalTo: paramNameLabel.bottomAnchor, constant: 8),
+                    controlRowView.bottomAnchor.constraint(equalTo: paramRowView.bottomAnchor),
+                    controlRowView.heightAnchor.constraint(equalToConstant: 28),
+
+                    // 最小值标签
+                    minLabel.leadingAnchor.constraint(equalTo: controlRowView.leadingAnchor),
+                    minLabel.centerYAnchor.constraint(equalTo: controlRowView.centerYAnchor),
                     minLabel.widthAnchor.constraint(equalToConstant: 40),
 
+                    // 滑块
                     slider.leadingAnchor.constraint(equalTo: minLabel.trailingAnchor, constant: 8),
-                    slider.centerYAnchor.constraint(equalTo: paramRowView.centerYAnchor),
-                    slider.widthAnchor.constraint(equalToConstant: 120),
+                    slider.centerYAnchor.constraint(equalTo: controlRowView.centerYAnchor),
+                    slider.widthAnchor.constraint(equalToConstant: 150),
 
-                    valueLabel.leadingAnchor.constraint(equalTo: slider.trailingAnchor, constant: 8),
-                    valueLabel.centerYAnchor.constraint(equalTo: paramRowView.centerYAnchor),
-                    valueLabel.widthAnchor.constraint(equalToConstant: 50),
+                    // 最大值标签
+                    maxLabel.leadingAnchor.constraint(equalTo: slider.trailingAnchor, constant: 8),
+                    maxLabel.centerYAnchor.constraint(equalTo: controlRowView.centerYAnchor),
+                    maxLabel.widthAnchor.constraint(equalToConstant: 40),
 
-                    maxLabel.leadingAnchor.constraint(equalTo: valueLabel.trailingAnchor, constant: 8),
-                    maxLabel.centerYAnchor.constraint(equalTo: paramRowView.centerYAnchor),
-                    maxLabel.trailingAnchor.constraint(equalTo: paramRowView.trailingAnchor),
-
-                    paramRowView.heightAnchor.constraint(equalToConstant: 30)
+                    // 当前值标签
+                    valueLabel.leadingAnchor.constraint(equalTo: maxLabel.trailingAnchor, constant: 8),
+                    valueLabel.centerYAnchor.constraint(equalTo: controlRowView.centerYAnchor),
+                    valueLabel.trailingAnchor.constraint(equalTo: controlRowView.trailingAnchor),
+                    valueLabel.widthAnchor.constraint(greaterThanOrEqualToConstant: 50)
                 ])
 
                 stackView.addArrangedSubview(paramRowView)
@@ -190,7 +210,7 @@ class AudioUnitEffectSlot: ObservableObject {
                 stackView.addArrangedSubview(moreLabel)
             }
         } else {
-            let infoLabel = NSTextField(wrappingLabelWithString: "此效果器已加载并集成到音效链中。在实时播放和导出时都会生效。")
+            let infoLabel = NSTextField(wrappingLabelWithString: "此效果器已加载并集成到音效链中。")
             infoLabel.lineBreakMode = .byWordWrapping
             stackView.addArrangedSubview(infoLabel)
         }
