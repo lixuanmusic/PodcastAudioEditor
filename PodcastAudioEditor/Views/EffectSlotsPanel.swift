@@ -278,13 +278,6 @@ struct EffectSlotsPanel: View {
             .padding(8)
 
             Divider()
-
-            // 说明
-            Text("信号流向: 播放器 → 插槽1 → 插槽2 → 插槽3 → 插槽4 → 输出")
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 8)
         }
         .background(Color(NSColor.controlBackgroundColor))
     }

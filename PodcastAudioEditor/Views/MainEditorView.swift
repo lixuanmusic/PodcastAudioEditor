@@ -17,24 +17,7 @@ struct MainEditorView: View {
         ZStack(alignment: .bottom) {
             VStack(spacing: 0) {
                 // 控制栏 - 扁平大按钮风格
-                HStack(spacing: 12) {
-                    // 分析按钮
-                    Button(action: {
-                        if analysisVM.isCurrentFileAnalyzed {
-                            // 已分析 - 打开分析结果窗口
-                            AnalysisWindowManager.shared.show(analysisVM: analysisVM)
-                        } else if let url = currentFileURL {
-                            // 未分析 - 开始分析
-                            analysisVM.analyzeAudioFile(url: url)
-                        }
-                    }) {
-                        Image(systemName: "waveform.circle")
-                            .font(.system(size: 16, weight: .semibold))
-                            .frame(width: 32, height: 32)
-                    }
-                    .disabled(currentFileURL == nil || analysisVM.isAnalyzing)
-                    .help(analysisVM.isCurrentFileAnalyzed ? "查看分析结果" : "分析音频")
-
+                HStack(spacing: 8) {
                     // 播放/暂停按钮
                     Button(action: {
                         viewModel.togglePlayPause()
@@ -55,6 +38,23 @@ struct MainEditorView: View {
                             .frame(width: 32, height: 32)
                     }
                     .help("重新开始")
+
+                    // 分析按钮
+                    Button(action: {
+                        if analysisVM.isCurrentFileAnalyzed {
+                            // 已分析 - 打开分析结果窗口
+                            AnalysisWindowManager.shared.show(analysisVM: analysisVM)
+                        } else if let url = currentFileURL {
+                            // 未分析 - 开始分析
+                            analysisVM.analyzeAudioFile(url: url)
+                        }
+                    }) {
+                        Image(systemName: "waveform.circle")
+                            .font(.system(size: 16, weight: .semibold))
+                            .frame(width: 32, height: 32)
+                    }
+                    .disabled(currentFileURL == nil || analysisVM.isAnalyzing)
+                    .help(analysisVM.isCurrentFileAnalyzed ? "查看分析结果" : "分析音频")
 
                     Spacer()
 
@@ -80,12 +80,13 @@ struct MainEditorView: View {
 
                     Spacer()
 
-                    // 导出按钮
-                    ExportButton(
-                        processor: audioProcessor,
-                        analysisVM: analysisVM,
-                        currentFileURL: $currentFileURL
-                    )
+                    // 导出按钮 - 纯图标样式
+                    Button(action: exportProcessedAudio) {
+                        Image(systemName: "square.and.arrow.up")
+                            .font(.system(size: 16, weight: .semibold))
+                            .frame(width: 32, height: 32)
+                    }
+                    .disabled(currentFileURL == nil || analysisVM.features.isEmpty)
                     .help("导出处理后的音频")
                 }
                 .padding(8)
@@ -157,6 +158,7 @@ struct MainEditorView: View {
             }
         }
         .ignoresSafeArea(.all, edges: .bottom)
+        .background(DropViewRepresentable(onDropped: handleDroppedFiles))
         .onReceive(viewModel.$currentTime) { currentTime in
             if viewModel.isPlaying && viewModel.waveformScale > 1.0 {
                 viewModel.updatePlaybackFollow()
@@ -197,6 +199,13 @@ struct MainEditorView: View {
         }
     }
 
+    // 处理拖拽打开文件
+    private func handleDroppedFiles(_ url: URL) {
+        currentFileURL = url
+        analysisVM.currentFileURL = url
+        showAnalysisCompleted = false
+    }
+
     private func timeString(_ t: Double) -> String {
         guard t.isFinite else { return "00:00" }
         let total = Int(t.rounded())
@@ -207,6 +216,45 @@ struct MainEditorView: View {
             return String(format: "%02d:%02d:%02d", h, m, s)
         } else {
             return String(format: "%02d:%02d", m, s)
+        }
+    }
+
+    // 导出处理后的音频
+    private func exportProcessedAudio() {
+        guard let inputURL = currentFileURL else { return }
+        guard !analysisVM.features.isEmpty else { return }
+
+        let savePanel = NSSavePanel()
+        savePanel.allowedContentTypes = [.audio]
+        savePanel.canCreateDirectories = true
+        savePanel.isExtensionHidden = false
+        savePanel.title = "导出处理后的音频"
+        savePanel.nameFieldStringValue = "processed_\(inputURL.deletingPathExtension().lastPathComponent).m4a"
+
+        savePanel.begin { response in
+            if response == .OK, let outputURL = savePanel.url {
+                Task {
+                    await processAndExport(inputURL: inputURL, outputURL: outputURL)
+                }
+            }
+        }
+    }
+
+    private func processAndExport(inputURL: URL, outputURL: URL) async {
+        do {
+            let gains = audioProcessor.calculateVolumeGains(features: analysisVM.features)
+            try await audioProcessor.processAudioFile(
+                inputURL: inputURL,
+                outputURL: outputURL,
+                gains: gains,
+                hopSize: 768,
+                frameSize: 1024
+            ) { progress in
+                // 导出进度回调
+            }
+            viewModel.showToast(message: "✓ 导出成功！")
+        } catch {
+            print("❌ 导出失败: \(error.localizedDescription)")
         }
     }
 }
@@ -416,4 +464,70 @@ class EventCapturingView: NSView {
     }
 }
 
+// 拖拽处理视图 - 使用原生 NSView 实现避免 SwiftUI onDrop 的 IPC 问题
+struct DropViewRepresentable: NSViewRepresentable {
+    let onDropped: (URL) -> Void
+
+    func makeNSView(context: Context) -> DropView {
+        let view = DropView()
+        view.onDropped = onDropped
+        return view
+    }
+
+    func updateNSView(_ nsView: DropView, context: Context) {}
+}
+
+class DropView: NSView {
+    var onDropped: ((URL) -> Void)?
+
+    override func awakeFromNib() {
+        super.awakeFromNib()
+        registerForDraggedTypes([NSPasteboard.PasteboardType.fileURL])
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        registerForDraggedTypes([NSPasteboard.PasteboardType.fileURL])
+    }
+
+    override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
+        let pasteboard = sender.draggingPasteboard
+        if pasteboard.types?.contains(NSPasteboard.PasteboardType.fileURL) ?? false {
+            return .copy
+        }
+        return []
+    }
+
+    override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
+        let pasteboard = sender.draggingPasteboard
+
+        // 尝试获取文件URL
+        if let files = pasteboard.propertyList(forType: NSPasteboard.PasteboardType.fileURL) as? [String] {
+            for fileString in files {
+                if let url = URL(string: fileString) {
+                    if isAudioFile(url) {
+                        onDropped?(url)
+                        return true
+                    }
+                }
+            }
+        }
+
+        // 备选方案：直接从 pasteboard 的 URLs 属性获取
+        if let urls = pasteboard.readObjects(forClasses: [NSURL.self], options: nil) as? [URL] {
+            if let url = urls.first, isAudioFile(url) {
+                onDropped?(url)
+                return true
+            }
+        }
+
+        return false
+    }
+
+    private func isAudioFile(_ url: URL) -> Bool {
+        let audioExtensions = ["m4a", "mp3", "wav", "aac", "flac", "aiff"]
+        let fileExtension = url.pathExtension.lowercased()
+        return audioExtensions.contains(fileExtension)
+    }
+}
 
