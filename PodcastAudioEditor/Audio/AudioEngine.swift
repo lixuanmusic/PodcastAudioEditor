@@ -486,6 +486,35 @@ final class AudioEngine: ObservableObject {
         }
     }
 
+    // MARK: - 动态音量平衡增益应用
+    /// 应用增益包络到 AUPeakLimiter 的 Pre-Gain 参数
+    /// - Parameters:
+    ///   - gainValue: 增益值（dB）
+    func applyDynamicGain(_ gainValue: Float) {
+        // 获取插槽1的AUPeakLimiter效果器
+        guard let slot = effectChain.getSlot(0),
+              let audioUnit = slot.audioUnit else { return }
+
+        let auAudioUnit = audioUnit.auAudioUnit
+
+        // 查找 Pre-Gain 参数（ID 通常是 0）
+        guard let parameterTree = auAudioUnit.parameterTree else { return }
+
+        // 遍历参数找到 Pre-Gain
+        if let preGainParam = parameterTree.allParameters.first(where: { param in
+            param.displayName.lowercased().contains("pregain") ||
+            param.displayName.lowercased().contains("pre-gain") ||
+            param.displayName.lowercased().contains("input")
+        }) {
+            // 将 gainValue（dB）转换为参数值
+            // Pre-Gain 通常以 dB 为单位，范围 -96 到 24
+            let clampedGain = max(-96.0, min(24.0, gainValue))
+            preGainParam.value = AUValue(clampedGain)
+
+            print("🔊 应用增益: \(String(format: "%.2f", gainValue))dB 到 Pre-Gain")
+        }
+    }
+
     // MARK: - 波形生成（参考 Miniwave 并行处理）
     private func extractWaveformData(from url: URL) {
         print("🌊 开始生成波形数据")

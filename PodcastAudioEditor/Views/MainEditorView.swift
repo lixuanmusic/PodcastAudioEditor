@@ -5,6 +5,7 @@ struct MainEditorView: View {
     @StateObject var viewModel = AudioPlayerViewModel()
     @StateObject var analysisVM = AudioAnalysisViewModel()
     @StateObject var audioProcessor = AudioProcessor()
+    @StateObject var dynamicVolumeVM = DynamicVolumeBalanceViewModel()
     @State private var isWaveformHovered: Bool = false
     @State private var showAnalysisWindow = false
     @State private var currentFileURL: URL?
@@ -12,11 +13,15 @@ struct MainEditorView: View {
     // 分析完成提示
     @State private var showAnalysisCompleted = false
     @State private var analysisCompletedTimer: Timer?
-    
+
     var body: some View {
-        ZStack(alignment: .bottom) {
+        // 初始化时设置 audioEngine 引用（仅在首次为nil时设置）
+        if dynamicVolumeVM.audioEngine == nil {
+            dynamicVolumeVM.audioEngine = viewModel.audioEngine
+        }
+
+        return ZStack(alignment: .bottom) {
             VStack(spacing: 0) {
-                // 控制栏 - 扁平大按钮风格
                 HStack(spacing: 8) {
                     // 播放/暂停按钮
                     Button(action: {
@@ -80,6 +85,23 @@ struct MainEditorView: View {
 
                     Spacer()
 
+                    // 动态音量平衡按钮
+                    Button(action: {
+                        if dynamicVolumeVM.envelopeData == nil && !analysisVM.features.isEmpty {
+                            // 已有分析结果，直接生成增益包络
+                            dynamicVolumeVM.calculateGainEnvelope(from: analysisVM.features, audioDuration: viewModel.duration)
+                        } else if analysisVM.features.isEmpty && currentFileURL != nil {
+                            // 没有分析结果，先分析
+                            analysisVM.analyzeAudioFile(url: currentFileURL!)
+                        }
+                    }) {
+                        Image(systemName: dynamicVolumeVM.isEnabled ? "waveform.badge.magnifyingglass.fill" : "waveform.badge.magnifyingglass")
+                            .font(.system(size: 16, weight: .semibold))
+                            .frame(width: 32, height: 32)
+                    }
+                    .disabled(currentFileURL == nil)
+                    .help(dynamicVolumeVM.isEnabled ? "动态音量平衡已启用" : "启用动态音量平衡")
+
                     // 导出按钮 - 纯图标样式
                     Button(action: exportProcessedAudio) {
                         Image(systemName: "square.and.arrow.up")
@@ -142,8 +164,28 @@ struct MainEditorView: View {
                             .transition(.move(edge: .top).combined(with: .opacity))
                     }
                 }
-                
+
                 Divider()
+
+                // 增益包络曲线 - 与波形完全绑定
+                if dynamicVolumeVM.isEnabled {
+                    VStack(spacing: 0) {
+                        Text("增益包络")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .padding(.vertical, 4)
+
+                        GainEnvelopeCurveView(
+                            envelopeData: dynamicVolumeVM.envelopeData,
+                            currentTime: viewModel.currentTime,
+                            duration: viewModel.duration,
+                            scrollOffset: viewModel.waveformScrollOffset,
+                            scale: viewModel.waveformScale,
+                            waveformWidth: viewModel.waveformWidth
+                        )
+                    }
+                    .frame(height: 60)
+                }
 
                 // AU 效果器链面板
                 EffectSlotsPanel(audioEngine: viewModel.audioEngine)
@@ -163,8 +205,11 @@ struct MainEditorView: View {
             if viewModel.isPlaying && viewModel.waveformScale > 1.0 {
                 viewModel.updatePlaybackFollow()
             }
-            
-            // 增益更新由AudioEngine在updateCurrentTime中自动处理
+
+            // 如果启用了动态音量平衡，应用增益
+            if dynamicVolumeVM.isEnabled, let gain = dynamicVolumeVM.getGainAtTime(currentTime) {
+                viewModel.audioEngine.applyDynamicGain(gain)
+            }
         }
         .onReceive(viewModel.$isPlaying) { isPlaying in
             if !isPlaying {
@@ -242,7 +287,17 @@ struct MainEditorView: View {
 
     private func processAndExport(inputURL: URL, outputURL: URL) async {
         do {
-            let gains = audioProcessor.calculateVolumeGains(features: analysisVM.features)
+            // 优先使用动态音量平衡生成的增益包络
+            let gains: [Float]
+            if dynamicVolumeVM.isEnabled, let envelopeData = dynamicVolumeVM.envelopeData {
+                gains = envelopeData.gains
+                print("📊 使用动态增益包络进行导出: \(gains.count)个增益点")
+            } else {
+                // 降级方案：使用原始的音量平衡增益计算
+                gains = audioProcessor.calculateVolumeGains(features: analysisVM.features)
+                print("📊 使用原始增益计算进行导出: \(gains.count)个增益点")
+            }
+
             try await audioProcessor.processAudioFile(
                 inputURL: inputURL,
                 outputURL: outputURL,
