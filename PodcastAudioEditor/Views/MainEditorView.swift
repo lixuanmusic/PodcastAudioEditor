@@ -89,7 +89,8 @@ struct MainEditorView: View {
                     Button(action: {
                         if dynamicVolumeVM.envelopeData == nil && !analysisVM.features.isEmpty {
                             // 已有分析结果，直接生成增益包络
-                            dynamicVolumeVM.calculateGainEnvelope(from: analysisVM.features, audioDuration: viewModel.duration)
+                            // 使用特征数据本身的时间范围（确保时间映射一致）
+                            dynamicVolumeVM.calculateGainEnvelope(from: analysisVM.features)
                         } else if analysisVM.features.isEmpty && currentFileURL != nil {
                             // 没有分析结果，先分析
                             analysisVM.analyzeAudioFile(url: currentFileURL!)

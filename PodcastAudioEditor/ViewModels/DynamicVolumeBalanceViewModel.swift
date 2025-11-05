@@ -23,10 +23,8 @@ class DynamicVolumeBalanceViewModel: ObservableObject {
     // MARK: - 公开方法
 
     /// 从音频特征计算增益包络，并自动加载AUPeakLimiter到插槽1
-    /// - Parameters:
-    ///   - features: 音频特征数组
-    ///   - audioDuration: 音频总时长（秒），用于正确的时间映射
-    func calculateGainEnvelope(from features: [AcousticFeatures], audioDuration: Double) {
+    /// - Parameter features: 音频特征数组
+    func calculateGainEnvelope(from features: [AcousticFeatures]) {
         isCalculating = true
         calculationProgress = 0.0
 
@@ -40,11 +38,15 @@ class DynamicVolumeBalanceViewModel: ObservableObject {
             let timestamps = features.map { $0.timestamp }
             let energyValues = features.map { $0.energy }
 
+            // 关键修复：使用特征数据本身的最后时间戳作为总时长
+            // 这样保证了时间映射的一致性（不会有缩放问题）
+            let totalDuration = timestamps.last ?? 0
+
             let envelopeData = GainEnvelopeData(
                 timestamps: timestamps,
                 gains: gains,
                 energyValues: energyValues,
-                totalDuration: audioDuration  // 传入实际的音频时长
+                totalDuration: totalDuration  // 使用特征时间范围的末尾
             )
 
             DispatchQueue.main.async {
@@ -54,7 +56,7 @@ class DynamicVolumeBalanceViewModel: ObservableObject {
                 self.calculationProgress = 0.0
 
                 print("✅ 动态音量平衡: 增益包络已生成，共\(gains.count)个增益点")
-                print("📊 时间映射: \(gains.count)帧 → \(String(format: "%.2f", audioDuration))秒")
+                print("📊 特征时间范围: 0 - \(String(format: "%.2f", totalDuration))秒")
 
                 // 自动加载 AUPeakLimiter 到插槽1
                 self.loadAUPeakLimiterToSlot1()
