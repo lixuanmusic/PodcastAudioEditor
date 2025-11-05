@@ -193,31 +193,43 @@ struct EffectUIWrapperView: View {
     @Binding var isPresented: Bool
 
     var body: some View {
-        VStack {
+        VStack(spacing: 0) {
+            // 标题栏 - 简化设计
             HStack {
-                Text("编辑 \(slot.effectName)")
+                Text(slot.effectName)
                     .font(.headline)
                 Spacer()
-                Button("关闭") {
-                    isPresented = false
+                Button(action: { isPresented = false }) {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(.secondary)
                 }
+                .buttonStyle(.plain)
             }
-            .padding()
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
 
-            if let viewController = slot.getAudioUnitViewController() {
-                EffectUIViewControllerRepresentable(viewController: viewController)
-            } else {
-                VStack {
-                    Image(systemName: "exclamationmark.triangle")
-                        .font(.system(size: 32))
-                        .foregroundStyle(.secondary)
-                    Text("无法加载效果器编辑界面")
-                        .foregroundStyle(.secondary)
+            Divider()
+
+            // 效果器参数 - 支持滚动
+            ScrollView {
+                if let viewController = slot.getAudioUnitViewController() {
+                    EffectUIViewControllerRepresentable(viewController: viewController)
+                        .frame(minHeight: 300)
+                } else {
+                    VStack(spacing: 12) {
+                        Image(systemName: "exclamationmark.triangle")
+                            .font(.system(size: 32))
+                            .foregroundStyle(.secondary)
+                        Text("无法加载效果器参数")
+                            .foregroundStyle(.secondary)
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .padding(20)
                 }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
-        .frame(minWidth: 400, minHeight: 300)
+        .frame(minWidth: 400, minHeight: 350)
     }
 }
 
@@ -238,7 +250,7 @@ struct EffectSlotsPanel: View {
     @ObservedObject var audioEngine: AudioEngine
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 0) {
             // 标题
             HStack {
                 Text("AU 效果器链")
@@ -251,19 +263,19 @@ struct EffectSlotsPanel: View {
                     .controlSize(.mini)
             }
             .padding(.horizontal, 12)
-            .padding(.top, 8)
+            .padding(.vertical, 8)
 
             Divider()
 
-            // 4个插槽
-            VStack(spacing: 8) {
+            // 4个插槽 - 横向布局
+            HStack(spacing: 8) {
                 ForEach(0..<4, id: \.self) { index in
                     if let slot = audioEngine.effectChain.getSlot(index) {
                         EffectSlotView(slot: slot, effectChain: audioEngine.effectChain)
                     }
                 }
             }
-            .padding(.horizontal, 12)
+            .padding(8)
 
             Divider()
 
@@ -272,18 +284,13 @@ struct EffectSlotsPanel: View {
                 .font(.caption2)
                 .foregroundStyle(.secondary)
                 .padding(.horizontal, 12)
-                .padding(.bottom, 8)
+                .padding(.vertical, 8)
         }
         .background(Color(NSColor.controlBackgroundColor))
-        .overlay(
-            RoundedRectangle(cornerRadius: 8)
-                .stroke(Color.gray.opacity(0.2), lineWidth: 1)
-        )
-        .padding(8)
     }
 }
 
 #Preview {
     EffectSlotsPanel(audioEngine: AudioEngine.shared)
-        .frame(height: 400)
+        .frame(height: 200)
 }

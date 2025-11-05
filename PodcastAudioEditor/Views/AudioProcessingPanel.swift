@@ -1,83 +1,42 @@
 import SwiftUI
 
-struct AudioProcessingPanel: View {
+// 导出按钮组件 - 用于在控制栏中使用
+struct ExportButton: View {
     @ObservedObject var processor: AudioProcessor
     @ObservedObject var analysisVM: AudioAnalysisViewModel
-    @ObservedObject var audioEngine: AudioEngine
     @Binding var currentFileURL: URL?
 
-    @State private var showExportDialog = false
     @State private var isExporting = false
     @State private var exportProgress: Double = 0.0
     @State private var showSuccessMessage = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            // 标题
-            Text("音频优化")
-                .font(.headline)
-                .padding(.horizontal, 12)
-                .padding(.top, 8)
-
-            Divider()
-
-            // 暂未实现的功能区域（保留位置）
-            VStack(alignment: .leading, spacing: 8) {
-                HStack {
-                    Text("更多优化功能")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    Spacer()
-                    Image(systemName: "ellipsis.circle")
+        VStack(spacing: 4) {
+            if isExporting {
+                // 导出中 - 显示进度条
+                VStack(spacing: 4) {
+                    ProgressView(value: exportProgress)
+                        .frame(height: 4)
+                    Text("导出中...")
+                        .font(.caption2)
                         .foregroundStyle(.secondary)
                 }
-                .padding(.horizontal, 12)
-            }
-            .padding(.vertical, 8)
-
-            Divider()
-
-            // 导出按钮
-            HStack {
-                Spacer()
-
-                if isExporting {
-                    ProgressView(value: exportProgress) {
-                        Text("处理中...")
-                            .font(.caption)
-                    }
-                    .frame(width: 200)
-                } else {
-                    Button {
-                        exportProcessedAudio()
-                    } label: {
-                        Label("导出处理后的音频", systemImage: "square.and.arrow.up")
-                    }
-                    .disabled(currentFileURL == nil || analysisVM.features.isEmpty)
+                .frame(width: 100)
+            } else if showSuccessMessage {
+                // 成功提示
+                Text("✓ 导出成功！")
+                    .font(.caption2)
+                    .foregroundStyle(.green)
+            } else {
+                // 导出按钮
+                Button(action: exportProcessedAudio) {
+                    Image(systemName: "square.and.arrow.up")
+                        .font(.system(size: 16, weight: .semibold))
                 }
-
-                Spacer()
-            }
-            .padding(.horizontal, 12)
-            .padding(.bottom, 8)
-
-            if showSuccessMessage {
-                HStack {
-                    Spacer()
-                    Text("✓ 导出成功！")
-                        .font(.caption)
-                        .foregroundStyle(.green)
-                    Spacer()
-                }
-                .padding(.bottom, 4)
+                .disabled(currentFileURL == nil || analysisVM.features.isEmpty)
+                .help("导出处理后的音频")
             }
         }
-        .background(Color(NSColor.controlBackgroundColor))
-        .overlay(
-            RoundedRectangle(cornerRadius: 8)
-                .stroke(Color.gray.opacity(0.2), lineWidth: 1)
-        )
-        .padding(8)
     }
 
     private func exportProcessedAudio() {

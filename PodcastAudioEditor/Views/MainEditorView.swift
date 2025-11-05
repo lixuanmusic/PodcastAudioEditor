@@ -8,63 +8,87 @@ struct MainEditorView: View {
     @State private var isWaveformHovered: Bool = false
     @State private var showAnalysisWindow = false
     @State private var currentFileURL: URL?
+
+    // 分析完成提示
+    @State private var showAnalysisCompleted = false
+    @State private var analysisCompletedTimer: Timer?
     
     var body: some View {
         ZStack(alignment: .bottom) {
             VStack(spacing: 0) {
+                // 控制栏 - 扁平大按钮风格
                 HStack(spacing: 12) {
-                    Button {
-                        AudioFileManager.shared.presentOpenPanel()
-                    } label: {
-                        Label("导入", systemImage: "tray.and.arrow.down")
-                    }
-                    
                     // 分析按钮
-                    Button {
-                        if let url = currentFileURL {
-                            analysisVM.analyzeAudioFile(url: url)
+                    Button(action: {
+                        if analysisVM.isCurrentFileAnalyzed {
+                            // 已分析 - 打开分析结果窗口
                             AnalysisWindowManager.shared.show(analysisVM: analysisVM)
+                        } else if let url = currentFileURL {
+                            // 未分析 - 开始分析
+                            analysisVM.analyzeAudioFile(url: url)
                         }
-                    } label: {
-                        Label("分析", systemImage: "waveform.circle")
+                    }) {
+                        Image(systemName: "waveform.circle")
+                            .font(.system(size: 16, weight: .semibold))
+                            .frame(width: 32, height: 32)
                     }
                     .disabled(currentFileURL == nil || analysisVM.isAnalyzing)
+                    .help(analysisVM.isCurrentFileAnalyzed ? "查看分析结果" : "分析音频")
 
-                    Button {
+                    // 播放/暂停按钮
+                    Button(action: {
                         viewModel.togglePlayPause()
-                    } label: {
+                    }) {
                         Image(systemName: viewModel.isPlaying ? "pause.fill" : "play.fill")
+                            .font(.system(size: 16, weight: .semibold))
+                            .frame(width: 32, height: 32)
                     }
                     .keyboardShortcut(.space, modifiers: [])
+                    .help(viewModel.isPlaying ? "暂停" : "播放")
 
-                    Button {
+                    // 重新开始按钮
+                    Button(action: {
                         viewModel.seekToBeginning()
-                    } label: {
+                    }) {
                         Image(systemName: "backward.end.fill")
+                            .font(.system(size: 16, weight: .semibold))
+                            .frame(width: 32, height: 32)
                     }
+                    .help("重新开始")
 
-                    HStack {
-                        Image(systemName: "speaker.wave.2.fill")
-                        Slider(value: Binding(get: {
-                            Double(viewModel.audioEngine.volume)
-                        }, set: { viewModel.audioEngine.setVolume(Float($0)) }), in: 0...1)
-                        .frame(width: 160)
+                    Spacer()
+
+                    // 时间显示
+                    HStack(spacing: 2) {
+                        Text(timeString(viewModel.currentTime))
+                            .font(.system(size: 12, design: .monospaced))
+                        Text("/")
+                            .foregroundStyle(.secondary)
+                            .font(.system(size: 12, design: .monospaced))
+                        Text(timeString(viewModel.duration))
+                            .font(.system(size: 12, design: .monospaced))
+                            .foregroundStyle(.secondary)
+
+                        // 缩放级别显示
+                        if viewModel.waveformScale > 1.0 {
+                            Text("  ")
+                            Text("缩放: \(Int(viewModel.waveformScale * 100))%")
+                                .font(.system(size: 11, design: .monospaced))
+                                .foregroundStyle(.secondary)
+                        }
                     }
 
                     Spacer()
 
-                    Text(timeString(viewModel.currentTime))
-                    Text("/")
-                    Text(timeString(viewModel.duration)).foregroundStyle(.secondary)
-                    
-                    // 缩放级别显示
-                    if viewModel.waveformScale > 1.0 {
-                        Text("缩放: \(Int(viewModel.waveformScale * 100))%")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
+                    // 导出按钮
+                    ExportButton(
+                        processor: audioProcessor,
+                        analysisVM: analysisVM,
+                        currentFileURL: $currentFileURL
+                    )
+                    .help("导出处理后的音频")
                 }
-                .padding(12)
+                .padding(8)
 
                 Divider()
 
@@ -74,9 +98,43 @@ struct MainEditorView: View {
                 ZStack(alignment: .topTrailing) {
                     WaveformView(viewModel: viewModel, isHovered: $isWaveformHovered)
                         .background(Color(NSColor.controlBackgroundColor))
-                    
+
                     // Toast 提示 - 使用 overlay 不占用空间
-                    if viewModel.showToast {
+                    if analysisVM.isAnalyzing {
+                        // 分析进度中 Toast
+                        VStack(spacing: 8) {
+                            ProgressView(value: analysisVM.analysisProgress)
+                                .frame(width: 150)
+                            HStack(spacing: 6) {
+                                Text("分析中...")
+                                    .font(.caption)
+                                Text("\(Int(analysisVM.analysisProgress * 100))%")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        .padding(12)
+                        .background(Color.black.opacity(0.7))
+                        .foregroundColor(.white)
+                        .cornerRadius(8)
+                        .padding(.top, 12)
+                        .padding(.trailing, 20)
+                        .transition(.move(edge: .top).combined(with: .opacity))
+                    } else if showAnalysisCompleted {
+                        // 分析完成提示 Toast
+                        Text("✓ 分析完成")
+                            .font(.system(size: 14, weight: .medium))
+                            .foregroundColor(.white)
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 8)
+                            .background(
+                                RoundedRectangle(cornerRadius: 8)
+                                    .fill(Color.green.opacity(0.8))
+                            )
+                            .padding(.top, 12)
+                            .padding(.trailing, 20)
+                            .transition(.move(edge: .top).combined(with: .opacity))
+                    } else if viewModel.showToast {
                         ToastView(message: viewModel.toastMessage)
                             .padding(.top, 12)
                             .padding(.trailing, 20)
@@ -86,27 +144,16 @@ struct MainEditorView: View {
                 
                 Divider()
 
-                // 音频处理面板
-                AudioProcessingPanel(
-                    processor: audioProcessor,
-                    analysisVM: analysisVM,
-                    audioEngine: viewModel.audioEngine,
-                    currentFileURL: $currentFileURL
-                )
-                .frame(height: 180)
-
-                Divider()
-
                 // AU 效果器链面板
                 EffectSlotsPanel(audioEngine: viewModel.audioEngine)
-                    .frame(height: 280)
+                    .frame(height: 150)
             }
-            
-            // 滚动条 - 在所有底部面板上方
+
+            // 滚动条 - 在效果器链面板上方
             if viewModel.isWaveformScrollable {
                 HorizontalScrollbar(viewModel: viewModel)
                     .frame(height: 12)
-                    .offset(y: -(180 + 280)) // 向上偏移两个面板的高度
+                    .offset(y: -150) // 向上偏移效果器链面板的高度
             }
         }
         .ignoresSafeArea(.all, edges: .bottom)
@@ -126,6 +173,26 @@ struct MainEditorView: View {
         .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("didImportAudioFile"))) { notification in
             if let url = notification.userInfo?["url"] as? URL {
                 currentFileURL = url
+                // 更新analysisVM的当前文件URL
+                analysisVM.currentFileURL = url
+                // 切换文件时重置分析完成标记
+                showAnalysisCompleted = false
+            }
+        }
+        .onReceive(analysisVM.$isAnalyzing) { isAnalyzing in
+            if !isAnalyzing && analysisVM.analysisProgress >= 1.0 {
+                // 分析完成 - 显示完成提示2秒
+                showAnalysisCompleted = true
+
+                // 取消之前的计时器
+                analysisCompletedTimer?.invalidate()
+
+                // 设置2秒后隐藏
+                analysisCompletedTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: false) { _ in
+                    withAnimation {
+                        showAnalysisCompleted = false
+                    }
+                }
             }
         }
     }
