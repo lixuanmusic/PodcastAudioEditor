@@ -4,12 +4,12 @@ import Accelerate
 /// 动态音量平衡增益包络计算器
 class GainEnvelopeCalculator {
     // MARK: - 配置参数
-    private let targetRMS: Float = -14.0  // 目标RMS电平（dB）
-    private let minGain: Float = -12.0    // 最小增益（dB）
-    private let maxGain: Float = 12.0     // 最大增益（dB）
+    private let targetRMS: Float = -20.0  // 目标RMS电平（dB）
+    private let minGain: Float = -20.0    // 最小增益（dB）
+    private let maxGain: Float = 20.0     // 最大增益（dB）
 
     // 平滑参数
-    private let smoothingWindowSize: Int = 5  // 用于平滑的窗口大小（帧数）
+    private let smoothingWindowSize: Int = 10  // 用于平滑的窗口大小（帧数）
     private let attackTime: Double = 0.05     // 攻击时间（秒）
     private let releaseTime: Double = 0.2     // 释放时间（秒）
 

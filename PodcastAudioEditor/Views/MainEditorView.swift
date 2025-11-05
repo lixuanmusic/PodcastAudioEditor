@@ -66,12 +66,12 @@ struct MainEditorView: View {
                     // 时间显示
                     HStack(spacing: 2) {
                         Text(timeString(viewModel.currentTime))
-                            .font(.system(size: 12, design: .monospaced))
+                            .font(.system(size: 16, design: .monospaced))
                         Text("/")
                             .foregroundStyle(.secondary)
-                            .font(.system(size: 12, design: .monospaced))
+                            .font(.system(size: 16, design: .monospaced))
                         Text(timeString(viewModel.duration))
-                            .font(.system(size: 12, design: .monospaced))
+                            .font(.system(size: 16, design: .monospaced))
                             .foregroundStyle(.secondary)
 
                         // 缩放级别显示

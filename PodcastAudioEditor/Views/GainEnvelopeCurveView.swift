@@ -10,8 +10,8 @@ struct GainEnvelopeCurveView: View {
     let waveformWidth: CGFloat
 
     // 增益曲线参数
-    private let minGainDB: Float = -12.0
-    private let maxGainDB: Float = 12.0
+    private let minGainDB: Float = -20.0
+    private let maxGainDB: Float = 20.0
     private let centerLineDB: Float = 0.0
 
     var body: some View {
@@ -57,9 +57,13 @@ struct GainEnvelopeCurveView: View {
     private func drawGainCurve(context: inout GraphicsContext, data: GainEnvelopeData, size: CGSize) {
         guard !data.gains.isEmpty else { return }
 
+        // 计算实际波形宽度（与 WaveformView 保持一致）
+        let actualWaveformWidth = calculateActualWaveformWidth()
+        
         // 计算可见的时间范围
-        let visibleDuration = duration / Double(scale)
-        let visibleStart = Double(scrollOffset) / Double(waveformWidth) * visibleDuration
+        guard actualWaveformWidth > 0, duration > 0 else { return }
+        let visibleDuration = Double(waveformWidth) * duration / Double(actualWaveformWidth)
+        let visibleStart = Double(scrollOffset) * duration / Double(actualWaveformWidth)
         let visibleEnd = visibleStart + visibleDuration
 
         // 采样增益曲线（避免过多点导致绘制缓慢）
@@ -112,9 +116,13 @@ struct GainEnvelopeCurveView: View {
     private func drawPlaybackLine(context: inout GraphicsContext, size: CGSize) {
         guard duration > 0 else { return }
 
+        // 计算实际波形宽度（与 WaveformView 保持一致）
+        let actualWaveformWidth = calculateActualWaveformWidth()
+        
         // 计算当前时刻相对于可见范围的位置
-        let visibleDuration = duration / Double(scale)
-        let visibleStart = Double(scrollOffset) / Double(waveformWidth) * visibleDuration
+        guard actualWaveformWidth > 0 else { return }
+        let visibleDuration = Double(waveformWidth) * duration / Double(actualWaveformWidth)
+        let visibleStart = Double(scrollOffset) * duration / Double(actualWaveformWidth)
         let visibleEnd = visibleStart + visibleDuration
 
         if currentTime >= visibleStart && currentTime <= visibleEnd {
@@ -134,6 +142,15 @@ struct GainEnvelopeCurveView: View {
     }
 
     // MARK: - 辅助方法
+    /// 计算实际波形宽度（与 WaveformView 和 AudioPlayerViewModel 保持一致）
+    private func calculateActualWaveformWidth() -> CGFloat {
+        guard duration > 0 else { return waveformWidth }
+        let minPxPerSec: CGFloat = 50.0
+        let minWidth = CGFloat(duration) * minPxPerSec
+        let baseWidth = max(waveformWidth, minWidth)
+        return baseWidth * scale
+    }
+    
     /// 将增益值转换为y坐标
     private func gainToYPosition(_ gain: Float, height: CGFloat) -> CGFloat {
         let normalizedGain = Double(gain - centerLineDB) / Double(maxGainDB - minGainDB)
